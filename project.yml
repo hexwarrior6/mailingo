@@ -76,6 +76,21 @@ targets:
         SKIP_INSTALL: YES
         ENABLE_APP_SANDBOX: NO
 
+  TranslationCore:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Packages/MailingoKit/Sources/TranslationCore
+    dependencies:
+      - target: EmailCore
+    settings:
+      base:
+        PRODUCT_NAME: TranslationCore
+        PRODUCT_BUNDLE_IDENTIFIER: com.zhuyuhao.Mailingo.TranslationCore
+        DEFINES_MODULE: YES
+        SKIP_INSTALL: YES
+        ENABLE_APP_SANDBOX: NO
+
   Mailingo:
     type: application
     platform: macOS
@@ -96,6 +111,7 @@ targets:
         embed: true
         codeSign: true
       - target: EmailCore
+      - target: TranslationCore
     settings:
       base:
         PRODUCT_NAME: Mailingo

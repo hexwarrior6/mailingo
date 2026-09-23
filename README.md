@@ -10,16 +10,17 @@
 
 ## 当前状态
 
-**M3（核心管线）已可运行并在 App 内可见。** 还没有翻译引擎和侧栏。
+**M4（翻译引擎）已接通。** SwiftUI 桥接验证通过；端到端出中文还差一步：下载语言包。
 
 | 阶段 | 状态 |
 |---|---|
 | 需求基线（`docs/PRODUCT.md`） | ✅ |
 | 技术方案（`docs/IMPLEMENTATION_PLAN.md`） | ✅ 架构 C 已定 |
 | S0 探针：Mail 扩展能否作入口 + 数据源 | ✅ **四问全过**，见 [docs/S0-PROBE.md](docs/S0-PROBE.md) |
-| **M3 EmailCore：MIME 解码 + HTML 字节切片管线** | ✅ 已接入 App，23 个单元测试 |
-| M4 TranslationCore（真翻译引擎） | ⬜ 下一步 |
-| M5 Renderer / M6 吸附侧栏 | ⬜ |
+| M3 EmailCore：MIME 解码 + HTML 字节切片管线 | ✅ 23 个单元测试 |
+| **M4 TranslationCore：Apple 翻译引擎** | ✅ 桥接已验证（`✅ 拿到 session 0.09 秒`）；⏳ 待下载语言包出真中文 |
+| M5 Renderer（WKWebView 正式渲染） | ⬜ 下一步 |
+| M6 吸附侧栏 | ⬜ |
 
 S0 的关键结论：Mail 扩展（Message Security 扩展点）能在**阅读窗格**挂横幅，
 并由 Mail 把**原始 MIME 直接交给扩展**——因此整条链路
@@ -31,13 +32,21 @@ S0 的关键结论：Mail 扩展（Message Security 扩展点）能在**阅读�
 
 打开 Mailingo，**「邮件解析」页签**：
 
-- 左边是原文渲染，右边是把每个文本节点替换成 `〖N〗` 之后的渲染
-- 顶部一排指标：`非文本字节一致` / `标签序列一致` / 提取了多少段
-- 底部表格列出**每一个会被送去翻译的文本片段**（编号、类型、上下文标签、原文）
+- 左边原文渲染，右边译文渲染。引擎可在三者间切换：
+  - **Apple 翻译** —— 系统内置，真译文
+  - **标记替换** —— 每个文本节点变成 `〖N〗`，用来看清哪些节点被碰过
+  - **原样返回** —— 右侧应与左侧**逐字节相同**，用于验证切片没有副作用
+- 顶部指标：`非文本字节一致` / `标签序列一致` / `改动 N 段` / `提取 N 段`
+- 翻译进行中显示 `翻译中 40/282` 这样的进度
+- 底部表格列出每个会被送去翻译的片段（编号、类型、上下文标签、原文）
 
 左右一对比就能确认方案 §6 的核心要求：**表格、图片、颜色、条件注释原样都在，
-只有文字被换掉了。** 数据来源是从 Mail 真实收到的那封邮件（appex 写在沙盒容器里），
-也可以用「打开 .eml…」喂自造样本。
+只有文字被换掉了。** 数据来自 Mail 真实收到的那封邮件（appex 写在沙盒容器里），
+也可以用「打开 .eml…」喂样本。
+
+**首次出中文需要下载语言包**：点工具栏的「**翻译自检**」，系统会弹下载确认。
+启动时的自动自检**故意不触发下载**，避免没经你同意就弹窗。
+自检报告写在 `~/Library/Logs/Mailingo/translation-selftest.log`。
 
 ---
 
@@ -80,7 +89,7 @@ make diagnose      # 地面真相：os_log + appex 是否被拉起 + 注册情�
 | `make bootstrap` | 下载 XcodeGen 到 `.tools/`（幂等） |
 | `make gen` | 由 `project.yml` 生成 `Mailingo.xcodeproj` |
 | `make build` | 编译（含 appex 嵌入与签名） |
-| `make test` | 跑 EmailCore 单元测试（23 个，不需要证书、不到一秒） |
+| `make test` | 跑单元测试（33 个，不需要证书、不到一秒） |
 | `make verify-appex` | 校验 appex 是可加载的真扩展，而不是空壳 |
 | `make install-app` | 构建 + 校验 + 装到 `/Applications` + 重新注册 |
 | `make status` | S0 探针四问判定摘要 |
@@ -101,7 +110,7 @@ make diagnose      # 地面真相：os_log + appex 是否被拉起 + 注册情�
 ├── App/                   # 容器 App（现在是看板；将来承载吸附式侧栏）
 ├── MailExtension/         # Mail 扩展（appex）
 ├── Shared/                # App 与 appex 共用代码
-├── Packages/MailingoKit/  # 核心逻辑（EmailCore）。只依赖 Foundation
+├── Packages/MailingoKit/  # 核心逻辑：EmailCore（只依赖 Foundation）+ TranslationCore
 ├── Scripts/               # 校验与判定脚本
 └── docs/
     ├── PRODUCT.md              # 产品需求（需求基线）

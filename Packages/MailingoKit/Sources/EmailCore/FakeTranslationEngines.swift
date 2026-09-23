@@ -22,11 +22,24 @@ public struct MarkerTranslationEngine: TranslationEngine {
         self.template = template
     }
 
+    public func availability(source: Locale.Language?, target: Locale.Language) async -> TranslationAvailability {
+        .installed
+    }
+
     public func translate(
         segments: [TranslationSegment],
-        targetLanguage: String
+        sourceLanguage: Locale.Language?,
+        targetLanguage: Locale.Language,
+        progress: @Sendable (Int, Int) -> Void
     ) async throws -> [TranslatedSegment] {
-        segments.map { TranslatedSegment(id: $0.id, targetText: template($0.id)) }
+        let total = segments.count
+        var out: [TranslatedSegment] = []
+        out.reserveCapacity(total)
+        for (index, segment) in segments.enumerated() {
+            out.append(TranslatedSegment(id: segment.id, targetText: template(segment.id)))
+            progress(index + 1, total)
+        }
+        return out
     }
 }
 
@@ -37,10 +50,48 @@ public struct IdentityTranslationEngine: TranslationEngine {
 
     public init() {}
 
+    public func availability(source: Locale.Language?, target: Locale.Language) async -> TranslationAvailability {
+        .installed
+    }
+
     public func translate(
         segments: [TranslationSegment],
-        targetLanguage: String
+        sourceLanguage: Locale.Language?,
+        targetLanguage: Locale.Language,
+        progress: @Sendable (Int, Int) -> Void
     ) async throws -> [TranslatedSegment] {
-        segments.map { TranslatedSegment(id: $0.id, targetText: $0.sourceText) }
+        let total = segments.count
+        var out: [TranslatedSegment] = []
+        out.reserveCapacity(total)
+        for (index, segment) in segments.enumerated() {
+            out.append(TranslatedSegment(id: segment.id, targetText: segment.sourceText))
+            progress(index + 1, total)
+        }
+        return out
+    }
+}
+
+/// 会失败 / 会慢的引擎，用来验证 UI 的错误态与进度显示。
+public struct FailingTranslationEngine: TranslationEngine {
+    public let id = "fake.failing.v1"
+    public let displayName = "必定失败（测试用）"
+
+    private let message: String
+
+    public init(message: String = "这是测试用的失败") {
+        self.message = message
+    }
+
+    public func availability(source: Locale.Language?, target: Locale.Language) async -> TranslationAvailability {
+        .unsupported
+    }
+
+    public func translate(
+        segments: [TranslationSegment],
+        sourceLanguage: Locale.Language?,
+        targetLanguage: Locale.Language,
+        progress: @Sendable (Int, Int) -> Void
+    ) async throws -> [TranslatedSegment] {
+        throw TranslationEngineError.engineFailed(message)
     }
 }

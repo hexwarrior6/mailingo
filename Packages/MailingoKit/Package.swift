@@ -10,14 +10,20 @@ let package = Package(
     name: "MailingoKit",
     platforms: [.macOS(.v15)],
     products: [
-        .library(name: "EmailCore", targets: ["EmailCore"])
+        .library(name: "EmailCore", targets: ["EmailCore"]),
+        .library(name: "TranslationCore", targets: ["TranslationCore"])
     ],
     targets: [
         .target(name: "EmailCore"),
+        .target(name: "TranslationCore", dependencies: ["EmailCore"]),
         .testTarget(
             name: "EmailCoreTests",
             dependencies: ["EmailCore"],
             resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "TranslationCoreTests",
+            dependencies: ["TranslationCore", "EmailCore"]
         )
     ],
     // 与 App target 的 SWIFT_VERSION=5.0 保持一致。

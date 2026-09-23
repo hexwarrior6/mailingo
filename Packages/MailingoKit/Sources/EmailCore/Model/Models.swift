@@ -133,16 +133,79 @@ public struct TranslatedSegment: Sendable, Identifiable {
 
 // MARK: - 翻译引擎
 
-/// 翻译层抽象（方案 §7）。Ui 不直接依赖具体引擎。
+/// 语言对是否可用。
+///
+/// `.supported` 与 `.installed` 的区别很关键：前者代表系统支持这个语言对、
+/// 但**语言包还没下载**，首次翻译会触发系统下载。UI 要能区分「能翻」和
+/// 「要先下语言包」，否则用户会以为卡住了。
+public enum TranslationAvailability: Sendable, Equatable {
+    case installed
+    case supported
+    case unsupported
+
+    public var canTranslate: Bool {
+        self != .unsupported
+    }
+}
+
+public enum TranslationEngineError: Error, CustomStringConvertible {
+    case unsupportedLanguagePair(source: String?, target: String)
+    case cannotIdentifyLanguage
+    case sessionUnavailable(String)
+    case engineFailed(String)
+
+    public var description: String {
+        switch self {
+        case .unsupportedLanguagePair(let source, let target):
+            "不支持的语言对：\(source ?? "自动检测") → \(target)"
+        case .cannotIdentifyLanguage:
+            "无法识别源语言"
+        case .sessionUnavailable(let detail):
+            "翻译会话不可用：\(detail)"
+        case .engineFailed(let detail):
+            "翻译失败：\(detail)"
+        }
+    }
+}
+
+/// 翻译层抽象（方案 §7）。UI 不直接依赖具体引擎。
 public protocol TranslationEngine: Sendable {
     /// 进缓存 key 的命名空间，换引擎即自动失效旧缓存。
     var id: String { get }
     var displayName: String { get }
 
+    /// 查询语言对可用性。`source` 为 nil 表示交给引擎自动检测。
+    func availability(source: Locale.Language?, target: Locale.Language) async -> TranslationAvailability
+
+    /// 批量翻译。
+    ///
+    /// 契约：
+    /// - 返回的 `TranslatedSegment.id` 必须与入参一一对应 —— **不要依赖数组顺序**，
+    ///   将来接 LLM 的引擎不保证保序，按 id 对账才安全。
+    /// - `progress(已完成, 总数)` 会被多次调用，用于流式 UI；允许在任意线程调用。
+    /// - 抛错时调用方视为整批失败，不做部分提交。
     func translate(
         segments: [TranslationSegment],
-        targetLanguage: String
+        sourceLanguage: Locale.Language?,
+        targetLanguage: Locale.Language,
+        progress: @Sendable (_ completed: Int, _ total: Int) -> Void
     ) async throws -> [TranslatedSegment]
+}
+
+extension TranslationEngine {
+    /// 不需要进度的调用方用这个。
+    public func translate(
+        segments: [TranslationSegment],
+        sourceLanguage: Locale.Language?,
+        targetLanguage: Locale.Language
+    ) async throws -> [TranslatedSegment] {
+        try await translate(
+            segments: segments,
+            sourceLanguage: sourceLanguage,
+            targetLanguage: targetLanguage,
+            progress: { _, _ in }
+        )
+    }
 }
 
 // MARK: - 巡检结果
