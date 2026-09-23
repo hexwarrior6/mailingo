@@ -71,7 +71,7 @@ final class MailActivationFollower {
         case unhidden
     }
 
-    private let logger = Logger(subsystem: "com.zhuyuhao.Mailingo", category: "follow")
+    private static let logger = Logger(subsystem: "com.zhuyuhao.Mailingo", category: "follow")
     private var observers: [NSObjectProtocol] = []
 
     /// 我们的主窗口。
@@ -143,7 +143,7 @@ final class MailActivationFollower {
         // 「被激活」有可能是用户特意去点 Mail，这时不该抢；「从隐藏恢复」则是
         // 我们自己跟着 Mail 一起藏起来之后又一起回来，必须放出来。
         if reason == .activated, !Self.isCoveredByOtherApp(window) {
-            logger.notice("跟随：Mail 被激活，但我们上面没压着别的 App（只是想用 Mail）→ 不提窗")
+            Self.logger.notice("跟随：Mail 被激活，但我们上面没压着别的 App（只是想用 Mail）→ 不提窗")
             return
         }
 
@@ -152,7 +152,7 @@ final class MailActivationFollower {
         NSApp.unhideWithoutActivation()
         if window.isMiniaturized { window.deminiaturize(nil) }
         window.orderFrontRegardless()
-        logger.notice("跟随：Mail \(reason == .unhidden ? "重新显示" : "被激活且我们被压住") → 提到最前")
+        Self.logger.notice("跟随：Mail \(reason == .unhidden ? "重新显示" : "被激活且我们被压住") → 提到最前")
     }
 
     /// 我们的窗口上面是否压着**别的 App**（Mail 除外）的窗口。
@@ -174,24 +174,43 @@ final class MailActivationFollower {
             .runningApplications(withBundleIdentifier: mailBundleID).first
             .map { Int($0.processIdentifier) }
 
+        var above: [(pid: Int, layer: Int)] = []
+
         for entry in list {
             guard let number = entry[kCGWindowNumber as String] as? Int,
-                  let pid = entry[kCGWindowOwnerPID as String] as? Int else { continue }
+                  let pid = entry[kCGWindowOwnerPID as String] as? Int,
+                  let layer = entry[kCGWindowLayer as String] as? Int else { continue }
 
-            if number == ourNumber { return false }   // 走到自己为止，上面的都看完了
-            if pid == ourPID { continue }             // 自己的窗口不算
-            if pid == mailPID { continue }            // Mail 不算（见上）
-            return true                               // 别的 App 压在我们上面
+            // ★ 只看**普通窗口层**。
+            //
+            // 这是踩过的坑：`CGWindowList` 把 Dock、菜单栏这些系统 UI 排在**最
+            // 前面**（它们的 window level 更高），从前往后遍历第一个就撞上它们。
+            // 那些窗口的 PID 既不是我们也不是 Mail，于是被当成"有别的 App 压着"
+            // —— 结果就是"单击 Mail 我们反而盖回去"，也就是最早那个 bug。
+            //
+            // 我们的窗口是普通窗口（level 0），所以只跟同一层的比。
+            guard layer == 0 else { continue }
+
+            if number == ourNumber { break }   // 走到自己为止，上面的都看完了
+            if pid == ourPID { continue }      // 自己的窗口不算
+            above.append((pid, layer))
         }
 
-        // 列表里没找到自己（比如在别的空间）→ 当作被挡住，该提窗
-        return true
+        let others = above.filter { $0.pid != mailPID }
+        if !others.isEmpty {
+            Self.logger.notice("跟随：我们上面压着 \(others.count) 个别的 App 窗口（pid \(others.map(\.pid))）")
+            return true
+        }
+
+        // 列表里没找到自己（比如在别的空间）→ 当作被挡住，该提窗。
+        // 判断依据：上面 `break` 没发生过就没有记录到"走到自己"。
+        return !list.contains { ($0[kCGWindowNumber as String] as? Int) == ourNumber }
     }
 
     private func mailWasHidden() {
         guard isEnabled else { return }
         NSApp.hide(nil)
-        logger.notice("跟随：Mail 被隐藏 → 我们也隐藏")
+        Self.logger.notice("跟随：Mail 被隐藏 → 我们也隐藏")
     }
 }
 
