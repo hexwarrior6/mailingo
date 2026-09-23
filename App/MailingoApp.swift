@@ -72,6 +72,9 @@ struct RootView: View {
 
     var body: some View {
         pages
+            // 把宿主 NSWindow 交给 MailActivationFollower —— 它提窗时要用。
+            // SwiftUI 不直接暴露窗口对象，只能这样取一下。
+            .background(WindowAccessor())
             // Apple Translation 在 macOS 15 上只能通过 SwiftUI 的 .translationTask 拿到
             // session，所以必须有一个挂在**真实可见窗口**里的宿主视图（方案 §4.5）。
             .appleTranslationHost()

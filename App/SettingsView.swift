@@ -77,8 +77,17 @@ struct SettingsView: View {
     /// 检测信号来自「跟随 Mail」的轮询 —— Mail 的 AppleScript 会区分
     /// 「没有阅读窗口」和「没选中邮件」，前者正是我们要的。所以这个开关
     /// **依赖「跟随 Mail」**，没开跟随就没有信号，只能置灰。
+    @AppStorage(MailActivationFollower.enabledKey)
+    private var followsMailActivation = false
+
     private var mailLinkageSection: some View {
         Section {
+            Toggle("Mail 到前台时，把 Mailingo 的窗口也提到最前", isOn: $followsMailActivation)
+            Text("只提窗、**不抢键盘焦点** —— Mail 仍是活动 App，照常能打字滚动。"
+                 + "切到别的 App 时窗口不会消失：分屏下两个窗口本来就一起进退。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             Toggle("Mail 关掉阅读窗口时，同时关闭 Mailingo", isOn: $model.closesWithMail)
                 .disabled(!model.followsMailSelection)
 

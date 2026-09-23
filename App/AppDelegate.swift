@@ -28,6 +28,12 @@ extension Notification.Name {
 /// 不用它的时候不占内存，没必要再牺牲菜单栏。
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // 「Mail 到前台 → 我们的窗口也提到最前」。
+        // 挂观察者本身不需要权限，是否生效由设置里的开关决定。
+        MailActivationFollower.shared.start()
+    }
+
     /// 最后一个窗口关掉就退出，不留后台进程。
     ///
     /// 注意是"最后一个"：设置窗口开着时关掉主窗口不会退出 —— 那是对的，
