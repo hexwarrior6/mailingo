@@ -1,0 +1,76 @@
+From: Example Digest <digest@example.com>
+To: user1@example.com
+Subject: =?utf-8?Q?Your_weekly_digest_is_here?=
+Date: Mon, 22 Sep 2026 09:15:00 +0800
+Message-ID: <fixture-alt-1@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="----=_Part_0_1234567890.1234567890123"
+
+------=_Part_0_1234567890.1234567890123
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Your weekly digest is here
+
+Hello there, here is what happened this week. We shipped 3 new features and=
+ fixed 12 bugs.
+Read the full changelog: https://example.com/changelog
+
+Feature / Status
+Faster sync / Shipped
+Offline mode / In review
+Dark theme / Planned
+
+Upgrade now: https://example.com/upgrade
+
+------=_Part_0_1234567890.1234567890123
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html>
+<html><head>
+<meta charset=3D"utf-8">
+<title>Should not be translated</title>
+<style type=3D"text/css">
+  .btn { background:#0b5fff; color:#fff; padding:10px 18px; }
+  @media (max-width:600px){ .col { display:block !important; } }
+</style>
+</head>
+<body style=3D"margin:0;padding:0;background:#f4f5f7;">
+<!--[if mso]><table role=3D"presentation" width=3D"600"><tr><td><![endif]-->
+<table role=3D"presentation" width=3D"100%" cellpadding=3D"0" cellspacing=
+=3D"0" border=3D"0">
+  <tr><td align=3D"center" style=3D"padding:24px 0;">
+    <img src=3D"https://cdn.example.com/logo.png" width=3D"120" height=3D"3=
+2" alt=3D"Example Inc.">
+  </td></tr>
+  <tr><td class=3D"col" style=3D"padding:0 24px;">
+    <h1 style=3D"font-size:24px;color:#111;">Your weekly digest is here</h1>
+    <p>Hello&nbsp;there, here is what happened this week. We shipped <stron=
+g>3 new features</strong>
+       and fixed 12 bugs. Read the <a href=3D"https://example.com/changelog=
+?utm_source=3Demail&amp;utm_medium=3Ddigest">full changelog</a>.</p>
+    <table role=3D"presentation" width=3D"100%" cellpadding=3D"8" cellspaci=
+ng=3D"0" border=3D"1">
+      <tr><th align=3D"left">Feature</th><th align=3D"left">Status</th></tr>
+      <tr><td>Faster sync</td><td>Shipped</td></tr>
+      <tr><td>Offline mode</td><td>In review</td></tr>
+      <tr><td>Dark theme</td><td>Planned</td></tr>
+    </table>
+    <ul>
+      <li>Tip: press <kbd>=E2=8C=A5T</kbd> to translate.</li>
+      <li>Caf&eacute; hours changed &mdash; check the site.</li>
+    </ul>
+    <p style=3D"text-align:center;">
+      <a href=3D"https://example.com/upgrade" class=3D"btn" style=3D"text-d=
+ecoration:none;">Upgrade now</a>
+    </p>
+    <p style=3D"color:#888;font-size:12px;">You received this because you s=
+igned up. &#169; 2026 Example Inc.</p>
+  </td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+<img src=3D"https://track.example.com/open.gif?u=3Dabc123" width=3D"1" heig=
+ht=3D"1" alt=3D"">
+</body></html>
+------=_Part_0_1234567890.1234567890123--

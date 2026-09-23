@@ -1,0 +1,225 @@
+Received: from SEZPR01MB5972.apcprd01.prod.exchangelabs.com
+ (2603:1096:101:1ec::7) by SE3PR01MB8087.apcprd01.prod.exchangelabs.com with
+ HTTPS; Wed, 23 Sep 2026 13:01:46 +0000
+Received: from SG2PR02CA0123.apcprd02.prod.outlook.com (2603:1096:4:188::22)
+ by SEZPR01MB5972.apcprd01.prod.exchangelabs.com (2603:1096:101:1ec::7) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.21.451.14; Wed, 23 Sep
+ 2026 13:01:42 +0000
+Received: from SG1PEPF000082E4.apcprd02.prod.outlook.com
+ (2603:1096:4:188:cafe::8d) by SG2PR02CA0123.outlook.office365.com
+ (2603:1096:4:188::22) with Microsoft SMTP Server (version=TLS1_3,
+ cipher=TLS_AES_256_GCM_SHA384) id 15.21.451.14 via Frontend Transport; Wed,
+ 23 Sep 2026 13:01:41 +0000
+Authentication-Results: spf=pass (sender IP is 149.96.221.2)
+ smtp.mailfrom=service-now.com; dkim=pass (signature was verified)
+ header.d=service-now.com;dmarc=pass action=none
+ header.from=service-now.com;compauth=pass reason=100
+Received-SPF: Pass (protection.outlook.com: domain of service-now.com
+ designates 149.96.221.2 as permitted sender) receiver=protection.outlook.com;
+ client-ip=149.96.221.2; helo=outbound31.service-now.com; pr=E
+Received: from outbound31.service-now.com (149.96.221.2) by
+ SG1PEPF000082E4.mail.protection.outlook.com (10.167.240.4) with Microsoft
+ SMTP Server (version=TLS1_3, cipher=TLS_AES_256_GCM_SHA384) id 15.21.451.8
+ via Frontend Transport; Wed, 23 Sep 2026 13:01:41 +0000
+Received: from app128010.sin301.service-now.com (unknown [10.249.37.169])
+	by outbound31.service-now.com (Postfix) with ESMTP id 30363600149F
+	for <user1@example.com>; Wed, 23 Sep 2026 06:01:41 -0700 (PDT)
+DKIM-Filter: OpenDKIM Filter v2.11.0 outbound31.service-now.com 30363600149F
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=service-now.com;
+	s=6e326c68-2ce5-11ef-b5c8-0050568cadb3; t=1790168501; x=1791378101;
+	bh=uQEuxHX4DIEI6+KOXd0AKC1DlOVhhTf9O66oda1bo3c=;
+	h=Date:From:Reply-To:To:Message-ID:Subject:List-Unsubscribe:From:To:
+	 Cc:Date:Subject;
+	b=cG6DOuhYvX4PEus4IoKxofI/8/YD8HFXeuO0J7ud4FzHctNlfN62ePhxqtnosJIB7
+	 Nt/O9WuOMX9D1pW8dDdKCYZxG+vtvohxUoMWQF+cuyTJ+7MfCZ6FBnVTq14naHTOti
+	 DM07buZO75jbD3lElB2DXRGhPD24eLhAuec2Rkvyq/8XY2WpNHvMSgPvRaZEbE+YhD
+	 9ltW/hYQDRiQihPhZHRRX4k3WcrRnYKJbX2y8JzJ5tzblvYpmOlbiBfmqj/1n0oBDi
+	 2nYPM23cH/nEGWFID4WOgArzS8PDVFsk83tzXNaI06wMrIX/ZSHcwDnQofodZyPAG5
+	 OJJQEw+MuGGNg==
+Date: Wed, 23 Sep 2026 06:01:41 -0700 (PDT)
+From: "ServiceNow@EXAMPLE" <user2@example.com>
+Reply-To: "ServiceNow@EXAMPLE" <user3@example.com>
+To: user4@example.com
+Message-ID: <user5@example.com>
+Subject: EXAMPLE Service Lounge Appointment Booking/Reschedule Confirmation
+Content-Type: text/html; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+X-ServiceNow-Source: Notification-d4842846d77b3200811300285e61032d
+List-Unsubscribe: <mailto:user6@example.com?body=Sending+this+email+with+the+predefined+content+in+the+subject+and+body+will+unsubscribe+you+from+the+notification.%0D%0A%0D%0AUnsubscribe%3A%7B%22id%22%3A%22d4842846d77b3200811300285e61032d%22%2C%22token%22%3A%22c797e62132%22%7D &subject=Unsubscribe+from+%22Appointment+Confirmation%22>
+X-ServiceNow-SysEmail-Version: 2
+Precedence: bulk
+Auto-Submitted: auto-generated
+X-ServiceNow-Generated: true
+Return-Path: user7@example.com
+X-MS-Exchange-Organization-ExpirationStartTime: 23 Sep 2026 13:01:41.6252
+ (UTC)
+X-MS-Exchange-Organization-ExpirationStartTimeReason: OriginalSubmit
+X-MS-Exchange-Organization-ExpirationInterval: 1:00:00:00.0000000
+X-MS-Exchange-Organization-ExpirationIntervalReason: OriginalSubmit
+X-MS-Exchange-Organization-Network-Message-Id: 88bc78e3-f496-4ea6-d01a-08df1972cffb
+X-EOPAttributedMessage: 0
+X-EOPTenantAttributedMessage: 15ce9348-be2a-462b-8fc0-e1765a9b204a:0
+X-MS-Exchange-Organization-MessageDirectionality: Incoming
+X-MS-PublicTrafficType: Email
+X-MS-TrafficTypeDiagnostic: SG1PEPF000082E4:EE_|SEZPR01MB5972:EE_|SE3PR01MB8087:EE_
+X-MS-Exchange-Organization-AuthSource: SG1PEPF000082E4.apcprd02.prod.outlook.com
+X-MS-Exchange-Organization-AuthAs: Anonymous
+X-MS-Office365-Filtering-Correlation-Id: 88bc78e3-f496-4ea6-d01a-08df1972cffb
+X-LD-Processed: 15ce9348-be2a-462b-8fc0-e1765a9b204a,ExtFwd
+X-MS-Exchange-AtpMessageProperties: SA|SL
+X-MS-Exchange-Organization-SCL: -1
+X-Microsoft-Antispam: BCL:0;ARA:13230040|704161411799003|3072899012|3092899012|2092899012|30052699003|12012899012|260918224100599003|260918215300599003|5062899012|4022899009|10067099003|11063799006|56012099006|5063699009|19002099009|6133799003|18003699003|12063799003|8096899003|55112099003|3113699003|16102099003|21082099003;
+X-Forefront-Antispam-Report: CIP:149.96.221.2;CTRY:US;LANG:en;SCL:-1;SRV:;IPV:NLI;SFV:SKA;H:outbound31.service-now.com;PTR:outbound31.service-now.com;CAT:NONE;SFS:(13230040)(704161411799003)(3072899012)(3092899012)(2092899012)(30052699003)(12012899012)(260918224100599003)(260918215300599003)(5062899012)(4022899009)(10067099003)(11063799006)(56012099006)(5063699009)(19002099009)(6133799003)(18003699003)(12063799003)(8096899003)(55112099003)(3113699003)(16102099003)(21082099003);DIR:INB;
+X-MS-Exchange-ForwardingLoop: ForwardingHandled;15ce9348-be2a-462b-8fc0-e1765a9b204a
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 23 Sep 2026 13:01:41.5817
+ (UTC)
+X-MS-Exchange-CrossTenant-Network-Message-Id: 88bc78e3-f496-4ea6-d01a-08df1972cffb
+X-MS-Exchange-CrossTenant-Id: 15ce9348-be2a-462b-8fc0-e1765a9b204a
+X-MS-Exchange-CrossTenant-AuthSource: SG1PEPF000082E4.apcprd02.prod.outlook.com
+X-MS-Exchange-CrossTenant-AuthAs: Anonymous
+X-MS-Exchange-CrossTenant-FromEntityHeader: Internet
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: SEZPR01MB5972
+X-MS-Exchange-Transport-EndToEndLatency: 00:00:05.2292477
+X-MS-Exchange-Processed-By-BccFoldering: 15.21.0451.004
+Importance: high
+X-Priority: 1
+X-Microsoft-Antispam-Mailbox-Delivery:
+	ucf:0;jmr:0;auth:0;dest:I;ENG:(910005)(944506478)(944626604)(4710232)(4717077)(4999285)(920097)(930201)(20251009189)(140003);
+X-Microsoft-Antispam-Message-Info:
+	=?utf-8?B?WWEwL2JhUitBYVdoc2tJc2I3WHBiSmZhQW1zQTdaV0I5aTZ3WDZlblBTeTU4?=
+ =?utf-8?B?Mmdac2xNamRndEkyYTFzbng4amQ0eWwxUjgveU55ZkRqbmV3MG10UG1mZTVq?=
+ =?utf-8?B?c2V0V1BYc0lRQUlQNXpHZUZMZVgydkxxaW5zZUtXVTZQS1FjbnQzZGlRd0hS?=
+ =?utf-8?B?Sk9sWnBXMDF0K3lidFozVW04UElGWDVTeHhDZlQ1bitRTHBCbWdobUt4dHNS?=
+ =?utf-8?B?LzU5dndleU5OTStMa3l0MzJoc0w3ekFobC9CUkw5Rk1iYUNOZDRKVkd4aHhC?=
+ =?utf-8?B?TXpIMGk1VWV4ZFcyZkNYR0JBN1NqTVloY09qcnpGTFJNOUFNQTB6SEtBZ1cx?=
+ =?utf-8?B?SGtqYWhJaG9pNGs3dUJyUWxTT1ZBQWlBbnRXOTJtWG5kSXlEYm5ZOGpXZXpF?=
+ =?utf-8?B?NWc0Y0hFYzg2Q08xaTFLVmR1bGpWM2hSZUUzS1M2cFM0RjlhMnJlSTdETmx4?=
+ =?utf-8?B?QWducitIcnlGSHZuUlkxTXZLdS8yZ0MrZTRnd292THVVZFZTMXFOa1BIbktQ?=
+ =?utf-8?B?UmNZSU1GbVJTRVZSQ1JYQ3ZPaUhmMVJCUnJ5MVJ3dEpVNTdIaEVzTjRFK1FU?=
+ =?utf-8?B?aTA2UG5WWSt2aUc5ZHk5Wk9zN1daYlU5RGN0aFRTcklrVVQ3RWFmQlVkeER4?=
+ =?utf-8?B?aTRPWEJrZ0dzYlkyZkt4N1VGd3p1VENFVUNRVGlSallZV1ZBckhieThSdDVU?=
+ =?utf-8?B?d1BSa2kvUXJmYnVuNUsxVjFVbnZGTjFGdjRPN0NtWTBvbWZlRXM4cGpsU3VG?=
+ =?utf-8?B?OGpnMTNDNzFBbmI5QVUyVi8zME9kZHUyVjlXenIrWDFGdVNjcks3VituUU1N?=
+ =?utf-8?B?blVKU3pCZEFOYWRaQUdhQUFDRDMvQUlMcHRmeVhwejVRc1FwWWxVM0JTYTF3?=
+ =?utf-8?B?SmRDQ3FwOUhqaUxEU1BWaVVHdGhla0FjMXlaT2hHNjVQTmJsa2pwdmR3ZmF5?=
+ =?utf-8?B?TW1sYkdJLy96a0h1RFFOSExSaFJtOWFCTEJvdkhISVFUa041blNmTTk0Rnlz?=
+ =?utf-8?B?YW1EeDZHeEtXbGc0dkVJNWJ4b1ZmSi9PaFpFTnZ6UWNzaWNUN1JKdUJkd29K?=
+ =?utf-8?B?dndTY2U5NmpPTUlnSHpMVjFrV0VFK3F0TkRKOFdJdktwMTdjZU1lYm82T0xu?=
+ =?utf-8?B?cXRNenBYMld2TDNMQmVGL09rY0VoVWJyVmRWbGFnbS9PTWVYQldiSmxpZTVX?=
+ =?utf-8?B?bFByaU9Cc1RoSUladWdXNnYyYTM4QldUQVRjRnBoQWtQUkg4VXFma3NEUkI1?=
+ =?utf-8?B?c2tIRnQ2QUtGVEpVMmdBUU9oaEhFK1FJVzRROXAxSkcwWXZpekkwYVBQY1Js?=
+ =?utf-8?B?THIyZmc1YlhSS1psRk5FcXJZR3Y4WVZrY3FlbVhVRjFZY2VlbGY0T3ZnMlJ2?=
+ =?utf-8?B?WlVFek9US1JqSWVRSUt6dTc3Unp3dDhRb2xVZnVFYTZqNGEzeFRNNHk3Zk1Z?=
+ =?utf-8?B?dVNCc0tNbjRpZzRBYzc1NXFreEYzQW8vbjFkOWNEcmlicDMzaThtZTFtVUwv?=
+ =?utf-8?B?MmdyV3VrMytLdWlDZmVLYWNSazNyMVpMUkt1QkNYOVRFV0ViMWZ0cUxmMEZr?=
+ =?utf-8?B?YnFweWljUFMvSzZJcmtzQ2lET0lrVXlhdW1ibCtFQWdsZ3E2c2FuYUJOSThh?=
+ =?utf-8?B?bU5mbWhOZ0t3cjU0OXh3eUx1M1F0QzgycjZkbzlFeXBsWCtLcnhqOUtDYUNH?=
+ =?utf-8?B?Q3EzbS9FRVZuNTdBcjVtaldpWUFlNlZtb081ZU9Zdkt1TFBUR2lWUmtCb1JK?=
+ =?utf-8?B?SzJrSHRib3NweEZEVlI0QU9ZeG5xNnJPdzlrZ2kxd2xZKzIrSzFuWU9CdWFE?=
+ =?utf-8?B?YzN6NUhhNFVBQlIwcXJlZGJ0RXYrRXNZVEw1LzVyMTVhUDBNZXF4S3NGbnpK?=
+ =?utf-8?B?RHo3dy9vcUFwdjlnWDRvYkpZZVZQc1VPU0p1TXgyWG16TVBPeTdxMWdLL3Fk?=
+ =?utf-8?B?cE4weVMxKzh0bjBUVUxCU3MyM3BOR2Z1TE5jVDEzeUZmeGcwcU5YOC94M0Iz?=
+ =?utf-8?B?eUJEU2FSMVpHL25CdGdMU2hFemxiTTYyeGtPZXlTbXNsRWZLNzJVL3hkclJo?=
+ =?utf-8?B?aXlOMVhOVEFTSVZnbGtBUUVCcDdPSVBiSDh4Nnl5TU5vTFpGMjJEQXg2R2pq?=
+ =?utf-8?B?U0hCak1WZVpXQyttTzl2UnBlb21STmVveGJNU1dyWEJZWnBnUzF5b3lFc2Vq?=
+ =?utf-8?B?SjluZ0MwQXhFMGRpMGNrb0pGbXFCQ1ExVnREVkR2RWxCSVFVZm45Q01hQ0tM?=
+ =?utf-8?B?UVBXNHR5TlYySTlQZTlYVkV6SENnRCsxbTExaDI3TUxZd0FHSVhReFFnV0w2?=
+ =?utf-8?B?ZnhXMUU5eDRIa3VKMEFPUzFEVmgrbzk0eEUzQjNJMVZpK2R1Q2cyS0V2c1lr?=
+ =?utf-8?B?T0FJQUVvL3hkRnV3RUk2RlVWc0YwelhQUCtUVWk2aEFCNW5mK0hpL05Kc2xy?=
+ =?utf-8?B?bDdoQ01oclhreUx4aXJ3dHBpVlVIMmFnL1dRbEpOTkFjYXR6TmJPbGhlM3pY?=
+ =?utf-8?B?MTBQbUhqVkRvL0EvK0EwL0tEOHI1V3V2OUNjYUVNVUxBVkhPWGdIWkVua04v?=
+ =?utf-8?B?ZkRFeThtL2IrajJUNVduZmF0bHRwUS9mWVZad2ZSU3ZwM0RhWDFlWElsR2pE?=
+ =?utf-8?B?N0Y4UEJLL0JXYkpOMU9oclhkUWxnTFlmeXphaENpN1lzS1BZYWk3WlI3V0JD?=
+ =?utf-8?B?VGN3TUx4WG15R0x4cG93MUdSTEZLU2RWSVgvVnQ2cVN2Mmdaa0x6OUhxdWhr?=
+ =?utf-8?B?MWcwMmtmZktxNzF3blNrRERaeExjYk9xeUZlcGRkM3dCMTBaalVjTkkvMjRF?=
+ =?utf-8?B?S0VwaGwvcEg4N1VRTWNTclpBT0UreEhVUzR4RE9hblBBdVNTbDZlQkx3bWFX?=
+ =?utf-8?B?QkdMZWpKQUo1R1JGaVMzRjNUOWt6NVlpWmd6QWxMQkdqQ1RYOStNbWdodFY3?=
+ =?utf-8?B?TGtnUWFDeVJROVpFY2NJelozc0xnN0dJb29SeFJwZmhkUU82YXVaTFdKSStl?=
+ =?utf-8?B?ODdpa3kwanVqOGQvZHlJTmtXZHVqVmRFRkp3WTFIZzhrajM5OEJDZnVGQ0I5?=
+ =?utf-8?B?aWh6d1pkbFJUM3JldkxaUktzZEFQZTh1b1JnRzZvdlNacUZKRXhSK3pZRnd5?=
+ =?utf-8?B?L2lRM1c0SlNGV0RnbEJqM1piWjZJeUNVb1FBU3lsK0lEK3U0elB3a1l0NzAy?=
+ =?utf-8?B?dWVzRmtrTkNCazRtb0luSzFJZUFGemkrb0hBUTNXMDZvamxxUXMyQm50WGl1?=
+ =?utf-8?B?aUlHbVdVdEE2L1RtcG1STTZCRklzNDJmT3NIeExUcloxRW9NSWwxRmd2Zk1K?=
+ =?utf-8?B?LzkyVGpydVJQWTdMemdoRE5CWmRjeDZ5VTJFM0FoWWxadHhsTXF3bW5sYlJT?=
+ =?utf-8?B?YVMrejJTbmtBcWorbS9BK2t3cmd5Zm9DZDRWRGhxYyttMTNQL0Zxdi9rL3JM?=
+ =?utf-8?B?aytvWS9NM0RaSnM4d1RIVlBvRzJVV3VlRVpjcENYT2RtQlVTeG42ZFRwTG1t?=
+ =?utf-8?B?T21JMWUwdFZHTUZlSUQwNkp3T2JiTHc3NHNQVzdxaEdobVowSFUybW5CM1Zn?=
+ =?utf-8?B?Rkc5OE5UM3ZQM2dCcTgyVTltVXJFK0cyVUh6UHhHWXQ5M1Z0Z2piRWo0eEZ2?=
+ =?utf-8?B?Nm9iWk5EbHdqcXdrTWc3eEdQeWFKRmdNdXJ3VWJnaUQ2a2JaMUVRemkvNlR2?=
+ =?utf-8?B?K25sNEpRTHdXOUcyaFFCNVp2dlArR2ZpRzZ0UitKOWNSalc5NVY3MUJZTEww?=
+ =?utf-8?Q?42Tb9rN?=
+MIME-Version: 1.0
+
+<html><head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Dutf-8">
+<style>
+	#snc_notification_preference {
+		text-decoration: none;
+	}
+=09
+	#snc_notification_unsubscribe {
+		text-decoration: none;
+	}
+</style>
+</head>
+<body>
+<table width=3D"100%" cellpadding=3D"0" cellspacing=3D"0" style=3D"backgrou=
+nd-color:#eef7fb; border-collapse:collapse;">
+<tbody>
+<tr>
+<td width=3D"8" style=3D"background-color:#0046ff;">&nbsp;</td>
+<td style=3D"padding:10px;"><strong>[Alert: Non-EXAMPLE Email] Be cautious befo=
+re clicking any link or attachment.</strong>
+</td>
+</tr>
+</tbody>
+</table>
+<div>
+<p style=3D"font-family: 'Helvetica Neue'; font-size: 14px;"><span style=3D=
+"font-family: arial, helvetica, sans-serif; font-size: small;">Dear #ZHU YU=
+HAO#,</span></p>
+<p style=3D"font-family: 'Helvetica Neue'; font-size: 14px;"><span style=3D=
+"font-family: arial, helvetica, sans-serif; font-size: small;"><br>
+</span><span style=3D"font-family: arial, helvetica, sans-serif; font-size:=
+ small;">Your appointment
+<strong>WUA0102543 </strong>at <strong>NS3-01-03</strong> on <strong>24-09-=
+2026 14:00:00 SGT</strong><strong style=3D"font-family: arial, helvetica, s=
+ans-serif; font-size: small;">&nbsp;</strong>has been confirmed.</span>&nbs=
+p;</p>
+<p style=3D"line-height: normal; margin: 0in 0in 8pt; font-size: 11pt; font=
+-family: Calibri, sans-serif;">
+<span style=3D"font-family: arial, helvetica, sans-serif; font-size: small;=
+">Please note that your appointment will automatically be cancelled if you =
+arrive later than five (5) minutes from your allocated schedule.</span></p>
+<p style=3D"line-height: normal; margin: 0in 0in 8pt; font-size: 11pt; font=
+-family: Calibri, sans-serif;">
+<span style=3D"font-family: arial, helvetica, sans-serif; font-size: small;=
+">To view or reschedule your appointment, please click
+</span><span style=3D"font-family: arial, helvetica, sans-serif; font-size:=
+ small;"><a href=3D"https://ntuadminonestop.service-now.com/ntusp?id=3Dcust=
+om_walkup_online_checkin&amp;location_id=3D4a40fc62db68d4108672324d7c96195e=
+">here</a></span></p>
+<p style=3D"line-height: normal; margin: 0in 0in 8pt; font-size: 11pt; font=
+-family: Calibri, sans-serif;">
+<span style=3D"font-family: arial, helvetica, sans-serif; font-size: small;=
+">We look forward to meeting you.</span></p>
+<p style=3D"font-size: 11px;">&nbsp;</p>
+<p style=3D"font-size: 11px;"><span style=3D"font-family: arial, helvetica,=
+ sans-serif; font-size: small;">Thank you,</span></p>
+<p style=3D"font-size: 11px;"><span style=3D"font-family: arial, helvetica,=
+ sans-serif; font-size: small;">ServiceNow@EXAMPLE</span></p>
+<br>
+<br>
+<div>&nbsp;</div>
+<div style=3D"display:none">Ref:MSG20798551_jCJHAEvb0NE24nsRO65</div>
+</div>
+<hr>
+<p style=3D"font-size:10pt; color:#808080;font-family: 'Arial';">CONFIDENTI=
+ALITY: This email is intended solely for the person(s) named and may be con=
+fidential and/or privileged. If you are not the intended recipient, please =
+delete it, notify us and do not copy,
+ use, or disclose its contents. <br>
+Towards a sustainable earth: Print only when necessary. Thank you. </p>
+</body>
+</html>

@@ -47,7 +47,35 @@ settings:
     # 这个 flag 只关掉「编译期子进程的沙盒」，不影响产物的沙盒/签名设置。
     OTHER_SWIFT_FLAGS: "$(inherited) -disable-sandbox"
 
+# 核心逻辑与 UI/权限分离，模块边界由编译器强制（方案 §3.1）。
+# EmailCore 只依赖 Foundation，所以能在没有 Mail、没有权限的情况下被完整测试。
+#
+# 这里用**普通 framework target** 而不是本地 SPM 包：
+# xcodebuild 解析 SPM 包时要写 ~/Library/Caches/org.swift.swiftpm 和
+# DARWIN_USER_CACHE_DIR 下的 clang module cache，在受限构建环境（CI、agent 沙盒）
+# 里这两个路径都不可写，包解析会直接失败（-packageCachePath 管不到 manifest 缓存，
+# CFFIXED_USER_HOME 也只解决了一半）。framework target 没有这个问题。
+#
+# Packages/MailingoKit/Package.swift 仍然保留：`swift test` 用它跑单元测试很快，
+# 也是将来把核心抽成独立包时的现成入口。两边编译同一份源码。
+
 targets:
+  EmailCore:
+    # 用静态库而不是 framework：framework 是个 bundle，静态链接时既不该被嵌入，
+    # 又会被 codesign 当成"格式不认识"的包拒签。静态库只有 .a + .swiftmodule，
+    # 没有 bundle、没有嵌入、没有签名问题，同时 `import EmailCore` 照样成立。
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Packages/MailingoKit/Sources/EmailCore
+    settings:
+      base:
+        PRODUCT_NAME: EmailCore
+        PRODUCT_BUNDLE_IDENTIFIER: com.zhuyuhao.Mailingo.EmailCore
+        DEFINES_MODULE: YES
+        SKIP_INSTALL: YES
+        ENABLE_APP_SANDBOX: NO
+
   Mailingo:
     type: application
     platform: macOS
@@ -67,6 +95,7 @@ targets:
       - target: MailingoMailExtension
         embed: true
         codeSign: true
+      - target: EmailCore
     settings:
       base:
         PRODUCT_NAME: Mailingo

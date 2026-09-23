@@ -7,8 +7,11 @@ DerivedData/
 # 本地工具（XcodeGen 发行包，不进版本控制）
 .tools/
 
-# 探针落盘数据
-*.eml
+# ⚠️ 不要加 `*.eml`。
+# 探针 dump 的 last-message.eml 写在 appex 的沙盒容器里
+# （~/Library/Containers/…），在仓库之外，本来就不需要忽略；
+# 而测试 fixture 恰恰是 .eml，全局忽略会把它们一起吞掉 ——
+# 结果是测试引用的文件根本没进仓库，克隆下来直接挂。踩过一次。
 
 # Xcode / macOS
 xcuserdata/

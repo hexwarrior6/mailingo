@@ -10,20 +10,34 @@
 
 ## 当前状态
 
-**S0 探针已通过，架构确定。** 尚未开始产品功能实现。
+**M3（核心管线）已可运行并在 App 内可见。** 还没有翻译引擎和侧栏。
 
 | 阶段 | 状态 |
 |---|---|
 | 需求基线（`docs/PRODUCT.md`） | ✅ |
 | 技术方案（`docs/IMPLEMENTATION_PLAN.md`） | ✅ 架构 C 已定 |
 | S0 探针：Mail 扩展能否作入口 + 数据源 | ✅ **四问全过**，见 [docs/S0-PROBE.md](docs/S0-PROBE.md) |
-| M3 EmailCore（MIME 解码 + HTML 字节切片管线） | ⬜ 下一步 |
+| **M3 EmailCore：MIME 解码 + HTML 字节切片管线** | ✅ 已接入 App，23 个单元测试 |
+| M4 TranslationCore（真翻译引擎） | ⬜ 下一步 |
+| M5 Renderer / M6 吸附侧栏 | ⬜ |
 
 S0 的关键结论：Mail 扩展（Message Security 扩展点）能在**阅读窗格**挂横幅，
 并由 Mail 把**原始 MIME 直接交给扩展**——因此整条链路
 **不需要 Automation / Apple Events 权限**。
 
 架构：**扩展做入口与数据源 + 容器 App 做吸附式侧栏**。
+
+### App 现在能看到什么
+
+打开 Mailingo，**「邮件解析」页签**：
+
+- 左边是原文渲染，右边是把每个文本节点替换成 `〖N〗` 之后的渲染
+- 顶部一排指标：`非文本字节一致` / `标签序列一致` / 提取了多少段
+- 底部表格列出**每一个会被送去翻译的文本片段**（编号、类型、上下文标签、原文）
+
+左右一对比就能确认方案 §6 的核心要求：**表格、图片、颜色、条件注释原样都在，
+只有文字被换掉了。** 数据来源是从 Mail 真实收到的那封邮件（appex 写在沙盒容器里），
+也可以用「打开 .eml…」喂自造样本。
 
 ---
 
@@ -66,6 +80,7 @@ make diagnose      # 地面真相：os_log + appex 是否被拉起 + 注册情�
 | `make bootstrap` | 下载 XcodeGen 到 `.tools/`（幂等） |
 | `make gen` | 由 `project.yml` 生成 `Mailingo.xcodeproj` |
 | `make build` | 编译（含 appex 嵌入与签名） |
+| `make test` | 跑 EmailCore 单元测试（23 个，不需要证书、不到一秒） |
 | `make verify-appex` | 校验 appex 是可加载的真扩展，而不是空壳 |
 | `make install-app` | 构建 + 校验 + 装到 `/Applications` + 重新注册 |
 | `make status` | S0 探针四问判定摘要 |
@@ -83,9 +98,10 @@ make diagnose      # 地面真相：os_log + appex 是否被拉起 + 注册情�
 .
 ├── project.yml            # XcodeGen 工程定义（唯一事实来源，.xcodeproj 不入库）
 ├── Makefile               # 构建 / 安装 / 排查入口
-├── App/                   # 容器 App（探针阶段是看板；将来承载吸附式侧栏）
+├── App/                   # 容器 App（现在是看板；将来承载吸附式侧栏）
 ├── MailExtension/         # Mail 扩展（appex）
 ├── Shared/                # App 与 appex 共用代码
+├── Packages/MailingoKit/  # 核心逻辑（EmailCore）。只依赖 Foundation
 ├── Scripts/               # 校验与判定脚本
 └── docs/
     ├── PRODUCT.md              # 产品需求（需求基线）

@@ -216,9 +216,18 @@ Mail 阅读窗格横幅 / 头部图标
 
 ## 3. 架构设计
 
-### 3.1 模块划分（SPM 多 target，让编译器强制边界）
+### 3.1 模块划分（让编译器强制边界）
 
-PRODUCT.md §13 的目录是合理的，这里落成**真正的 SPM 模块**，而不是文件夹 —— 这样"Parser 不依赖 UI""Cache 不依赖具体模型"是编译器保证的，不是靠自觉。
+PRODUCT.md §13 的目录是合理的，这里落成**真正的模块**，而不是文件夹 —— 这样"Parser 不依赖 UI""Cache 不依赖具体模型"是编译器保证的，不是靠自觉。
+
+> **实施修正（M3）**：`EmailCore` 落成 **Xcode 的静态库 target**，而不是本地 SPM 包。
+> 原因：`xcodebuild` 解析 SPM 包时要写 `~/Library/Caches/org.swift.swiftpm` 和
+> `DARWIN_USER_CACHE_DIR` 下的 clang module cache，在受限构建环境（CI、agent 沙盒）里
+> 这两个路径都不可写，包解析直接失败。`-packageCachePath` 管不到 manifest 缓存，
+> `CFFIXED_USER_HOME` 也只解决一半。
+> 静态库 target 没有这个问题，而且**模块边界的目标完全达成**（`import EmailCore` 照样成立）。
+> `Packages/MailingoKit/Package.swift` 仍然保留 —— `swift test` 跑测试很快、CI 不需要证书，
+> 两边编译同一份源码。将来要把核心抽成独立包时，现成入口就在那里。
 
 ```
 mailingo/
@@ -657,7 +666,7 @@ key = SHA256( rawSourceBytes ‖ targetLanguage ‖ engine.id ‖ pipelineVersio
 | **M0** | Spike **S0**（架构决策）+ S1–S5 + 技术决策定稿 | 3–4 天 |
 | **M1** | 骨架：XcodeGen 工程、SPM 模块、`AppDependencies` 组装、菜单栏、⌥T、日志、测试基建 | 2 天 |
 | **M2** | MailIntegration：脚本 provider、权限探测与引导、全部错误态 | 1.5 天 |
-| **M3** | EmailCore：MIME 解码、Tokenizer、SegmentExtractor、HTMLSplicer、纯文本路径 + 黄金测试 | 4 天 |
+| **M3** | EmailCore：MIME 解码、Tokenizer、SegmentExtractor、HTMLSplicer、纯文本路径 + 黄金测试 | 4 天 | ✅ **已完成**（23 个单元测试，已接入 App 并排预览） |
 | **M4** | TranslationCore：`TranslationSessionHost`、Apple 引擎、分批/流式、语言检测、`FakeTranslationEngine` | 3 天 |
 | **M5** | Renderer：WKWebView、CID scheme handler、脚本剥离、远程图阻断、渐进更新（含 JS 比对兜底） | 2.5 天 |
 | **M6** | WindowIntegration：跟随、显隐同步、宽度持久化、多 Space/全屏 | 2 天 |

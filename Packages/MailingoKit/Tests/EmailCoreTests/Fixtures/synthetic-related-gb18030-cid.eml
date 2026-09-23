@@ -1,0 +1,28 @@
+From: Shop <shop@example.com>
+To: user2@example.com
+Subject: =?gb2312?B?tqm1pci3yM8=?=
+Date: Tue, 23 Sep 2026 14:02:11 +0800
+Message-ID: <fixture-rel-1@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/related; boundary="----=_Part_0_9876543210.0987654321098"; type="text/html"
+
+------=_Part_0_9876543210.0987654321098
+Content-Type: text/html; charset="gb18030"
+Content-Transfer-Encoding: base64
+
+PGh0bWw+PGhlYWQ+PG1ldGEgY2hhcnNldD0iZ2IxODAzMCI+PC9oZWFkPjxib2R5Pgo8aDE+tqm1
+pci3yM88L2gxPgo8cD7E+rrDo6zE+rXEtqm1pSA8c3Ryb25nPkExMjM0NTwvc3Ryb25nPiDS0bei
+u/WjrNSkvMYgMyDM7MTay82076GjPC9wPgo8cD48aW1nIHNyYz0iY2lkOmxvZ29AZXhhbXBsZSIg
+d2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBhbHQ9IkxvZ28iPjwvcD4KPHRhYmxlIGJvcmRlcj0iMSI+
+PHRyPjx0ZD7JzMa3PC90ZD48dGQ+yv3BvzwvdGQ+PC90cj48dHI+PHRkPrz8xcw8L3RkPjx0ZD4x
+PC90ZD48L3RyPjwvdGFibGU+CjxwPjxhIGhyZWY9Imh0dHBzOi8vZXhhbXBsZS5jb20vb3JkZXJz
+L0ExMjM0NSI+sum/tLaptaXP6sfpPC9hPjwvcD4KPC9ib2R5PjwvaHRtbD4=
+------=_Part_0_9876543210.0987654321098
+Content-Type: image/png; name="logo.png"
+Content-Transfer-Encoding: base64
+Content-ID: <logo@example>
+Content-Disposition: inline; filename="logo.png"
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmM
+IQAAAABJRU5ErkJggg==
+------=_Part_0_9876543210.0987654321098--

@@ -7,13 +7,17 @@ APPEX    := $(APP)/Contents/PlugIns/MailingoMailExtension.appex
 LOGDIR   := $(HOME)/Library/Containers/com.zhuyuhao.Mailingo.MailExtension/Data/Library/Logs/Mailingo
 LEGACY   := $(HOME)/Library/Logs/Mailingo
 LOG      := $(LOGDIR)/probe.log
+# 单元测试的临时目录（.build/ 已被 .gitignore 覆盖）
+SPMDIR   := $(CURDIR)/.build/spm
 
-.PHONY: help bootstrap gen build run register status log stream diagnose clean reset-log install-app verify-appex refresh-plugins
+
+.PHONY: help bootstrap gen build test run register status log stream diagnose clean reset-log install-app verify-appex refresh-plugins
 
 help:
 	@echo "make bootstrap  下载 XcodeGen 到 .tools/（无需 sudo，固定版本；克隆后先跑这个）"
 	@echo "make gen        生成 Mailingo.xcodeproj（XcodeGen）"
 	@echo "make build      编译（含 appex 嵌入）"
+	@echo "make test       跑 EmailCore 单元测试（23 个）"
 	@echo "make run        编译并启动容器 App（探针看板）"
 	@echo "make register   向 pluginkit 注册 appex，并列出 Mail 扩展"
 	@echo "make status     打印 S0 判定摘要"
@@ -51,6 +55,21 @@ gen:
 build: gen
 	xcodebuild -project Mailingo.xcodeproj -scheme Mailingo -configuration $(CONFIG) \
 	  -derivedDataPath $(DERIVED) build
+
+# 核心逻辑的单元测试。之所以用 `swift test` 而不是 xcodebuild：
+#  - 不依赖 Xcode 工程与签名，跑一次不到一秒，适合边写边跑
+#  - CI 里也不需要 Apple 证书
+# 两个环境变量是为了绕开受限构建环境：
+#  --disable-sandbox：Swift 宏让编译器用 sandbox-exec 起 plugin-server，
+#    在已是沙盒的环境里嵌套 sandbox-exec 会失败。
+#  TMPDIR / CLANG_MODULE_CACHE_PATH：默认缓存落在 ~/Library 与 DARWIN_USER_CACHE_DIR，
+#    受限环境不可写。
+test:
+	@mkdir -p "$(SPMDIR)/tmp" "$(SPMDIR)/mc"
+	@cd Packages/MailingoKit && \
+	  TMPDIR="$(SPMDIR)/tmp" \
+	  CLANG_MODULE_CACHE_PATH="$(SPMDIR)/mc" \
+	  swift test --disable-sandbox --scratch-path "$(SPMDIR)/scratch"
 
 run: build
 	open "$(APP)"

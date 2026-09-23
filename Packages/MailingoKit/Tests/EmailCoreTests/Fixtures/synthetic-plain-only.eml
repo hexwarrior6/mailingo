@@ -1,0 +1,14 @@
+From: Plain Sender <plain@example.com>
+To: user1@example.com
+Subject: Plain text only
+Date: Mon, 22 Sep 2026 09:15:00 +0800
+Message-ID: <fixture-plain-1@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+
+Hello,
+
+This message has no HTML part at all.
+
+Regards,
+Plain Sender
