@@ -1,0 +1,16 @@
+# 生成物
+.build/
+Mailingo.xcodeproj/
+Support/
+DerivedData/
+
+# 本地工具（XcodeGen 发行包，不进版本控制）
+.tools/
+
+# 探针落盘数据
+*.eml
+
+# Xcode / macOS
+xcuserdata/
+*.xcworkspace/xcuserdata/
+.DS_Store

@@ -1,0 +1,105 @@
+name: Mailingo
+
+options:
+  bundleIdPrefix: com.zhuyuhao
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: 75Q23985G5
+
+    # S0 探针阶段：手动签名（离线可用，不需要 provisioning profile，
+    # 因为还没有任何需要 profile 的 entitlement）。
+    # 注意：TCC / Mail 的授权绑定代码签名，务必保持签名身份稳定，
+    # 否则每次重建都会重新弹窗。
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "Apple Development"
+    PROVISIONING_PROFILE_SPECIFIER: ""
+
+    # 沙盒设置按 target 分别指定（见下面各 target 的 settings）。
+    # 关键：★ appex 必须沙盒化 —— macOS 的硬性要求，否则 pkd 不注册扩展，
+    # 表现就是 pluginkit -m -p com.apple.email.extension 返回 (no matches)，
+    # Mail 的扩展面板里永远是空的。Xcode 的 Mail Extension 模板本身也是
+    # ENABLE_APP_SANDBOX = YES，不要全局关掉它。
+    ENABLE_HARDENED_RUNTIME: NO
+
+    ALWAYS_SEARCH_USER_PATHS: NO
+    CLANG_ENABLE_MODULES: YES
+    SWIFT_EMIT_LOC_STRINGS: YES
+
+    # ★ 必须关闭 Xcode 16+ 的 Debug Dylib。
+    # 开启时主可执行文件只是一个 56KB 的 stub，真正的代码（含
+    # NSExtensionPrincipalClass 指向的 Swift 类）被挪进 xxx.debug.dylib。
+    # App 扩展没有 main() 入口 —— 宿主（Mail）是 dlopen 这个 appex、再按
+    # Info.plist 里的 principal class 名字去查类；stub 的 main 永远不会跑，
+    # 于是类根本没注册 → 扩展在 LaunchServices 里注册成功，但 Mail 里看不到。
+    ENABLE_DEBUG_DYLIB: NO
+
+    # Swift 宏（#Preview / @Observable 等）会让编译器用 sandbox-exec 启动
+    # swift-plugin-server。在已经处于沙盒里的构建环境（CI、本仓库的 agent 沙盒）中
+    # 嵌套 sandbox-exec 会失败：`sandbox-exec: sandbox_apply: Operation not permitted`。
+    # 这个 flag 只关掉「编译期子进程的沙盒」，不影响产物的沙盒/签名设置。
+    OTHER_SWIFT_FLAGS: "$(inherited) -disable-sandbox"
+
+targets:
+  Mailingo:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+      - path: Shared
+    info:
+      path: Support/Mailingo-Info.plist
+      properties:
+        CFBundleName: Mailingo
+        CFBundleDisplayName: Mailingo
+        CFBundlePackageType: APPL
+        LSMinimumSystemVersion: "15.0"
+        LSApplicationCategoryType: public.app-category.productivity
+        NSHumanReadableCopyright: "Mailingo"
+    dependencies:
+      - target: MailingoMailExtension
+        embed: true
+        codeSign: true
+    settings:
+      base:
+        PRODUCT_NAME: Mailingo
+        PRODUCT_BUNDLE_IDENTIFIER: com.zhuyuhao.Mailingo
+        COMBINE_HIDPI_IMAGES: YES
+        # 容器 App 保持非沙盒：V1.1 的「让 Mail 让出空间」需要 Accessibility，
+        # 而 Accessibility API 在沙盒下不可用（docs/IMPLEMENTATION_PLAN.md §5.2）。
+        ENABLE_APP_SANDBOX: NO
+
+  MailingoMailExtension:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: MailExtension
+      - path: Shared
+    info:
+      path: Support/MailingoMailExtension-Info.plist
+      properties:
+        CFBundleName: MailingoMailExtension
+        CFBundleDisplayName: Mailingo
+        CFBundlePackageType: XPC!
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.email.extension
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).MailingoMailExtension
+          NSExtensionAttributes:
+            MEExtensionCapabilities:
+              - MEMessageSecurityHandler
+    settings:
+      base:
+        PRODUCT_NAME: MailingoMailExtension
+        PRODUCT_BUNDLE_IDENTIFIER: com.zhuyuhao.Mailingo.MailExtension
+        PRODUCT_MODULE_NAME: MailingoMailExtension
+        SKIP_INSTALL: YES
+        # ★ 必须为 YES。macOS 要求 app 扩展沙盒化，否则 pkd 不注册它，
+        # pluginkit 查不到、Mail 扩展面板为空。Xcode 模板的默认值也是 YES。
+        ENABLE_APP_SANDBOX: YES
