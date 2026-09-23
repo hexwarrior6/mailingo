@@ -49,7 +49,26 @@ struct EmailInspectionView: View {
     // MARK: - 顶部
 
     private var toolbar: some View {
-        HStack(spacing: 10) {
+        // 并排使用时窗口会很窄，固定一行放不下 —— ViewThatFits 会自动折成两行。
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                toolbarLeading
+                Divider().frame(height: 16)
+                toolbarTrailing
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) { toolbarLeading; Spacer(minLength: 0) }
+                HStack(spacing: 10) { toolbarTrailing; Spacer(minLength: 0) }
+            }
+            .padding(12)
+        }
+    }
+
+    private var toolbarLeading: some View {
+        Group {
             messagePicker
 
             Button {
@@ -60,9 +79,11 @@ struct EmailInspectionView: View {
             .help("重新读取已捕获的邮件列表")
 
             Button("打开 .eml…") { isImporting = true }
+        }
+    }
 
-            Divider().frame(height: 16)
-
+    private var toolbarTrailing: some View {
+        Group {
             Picker("引擎", selection: $model.engineChoice) {
                 ForEach(InspectorModel.EngineChoice.allCases) { choice in
                     Text(choice.label).tag(choice)
@@ -70,16 +91,13 @@ struct EmailInspectionView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 260)
+            .frame(minWidth: 200, idealWidth: 240, maxWidth: 280)
 
             Button("翻译自检") {
                 Task { await model.runDiagnostics(allowDownloadTrigger: true) }
             }
             .help("跑一遍完整翻译并写入 translation-selftest.log。语言包未安装时会触发系统下载确认。")
-
-            Spacer()
         }
-        .padding(12)
     }
 
     /// 会话（来回好几封回复）里从这里选具体是哪一封。
@@ -107,7 +125,7 @@ struct EmailInspectionView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(maxWidth: 320, alignment: .leading)
+            .frame(minWidth: 120, idealWidth: 260, maxWidth: 320, alignment: .leading)
         }
         .menuStyle(.borderlessButton)
         .fixedSize(horizontal: false, vertical: true)
@@ -200,22 +218,24 @@ struct EmailInspectionView: View {
 
     private func summaryBar(_ inspection: EmailInspection) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                chip("原始 MIME \(model.sourceBytes) B", color: .blue)
-                chip("提取 \(inspection.segments.count) 段", color: .blue)
-                chip("改动 \(inspection.fidelity.changedSegmentCount) 段", color: .blue)
-                chip(
-                    inspection.fidelity.nonTextBytesIdentical ? "非文本字节一致" : "非文本字节被改动",
-                    color: inspection.fidelity.nonTextBytesIdentical ? .green : .red
-                )
-                chip(
-                    inspection.fidelity.tagSequenceIdentical ? "标签序列一致" : "标签序列被改动",
-                    color: inspection.fidelity.tagSequenceIdentical ? .green : .red
-                )
-                if inspection.usedPlainTextFallback {
-                    chip("纯文本回退", color: .orange)
+            // 窄窗口下 chip 会溢出，放进横向滚动容器里
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    chip("原始 MIME \(model.sourceBytes) B", color: .blue)
+                    chip("提取 \(inspection.segments.count) 段", color: .blue)
+                    chip("改动 \(inspection.fidelity.changedSegmentCount) 段", color: .blue)
+                    chip(
+                        inspection.fidelity.nonTextBytesIdentical ? "非文本字节一致" : "非文本字节被改动",
+                        color: inspection.fidelity.nonTextBytesIdentical ? .green : .red
+                    )
+                    chip(
+                        inspection.fidelity.tagSequenceIdentical ? "标签序列一致" : "标签序列被改动",
+                        color: inspection.fidelity.tagSequenceIdentical ? .green : .red
+                    )
+                    if inspection.usedPlainTextFallback {
+                        chip("纯文本回退", color: .orange)
+                    }
                 }
-                Spacer()
             }
 
             if let message = model.currentMessage {

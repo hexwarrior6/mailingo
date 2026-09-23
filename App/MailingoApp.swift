@@ -16,9 +16,12 @@ struct MailingoApp: App {
         // 所以单实例 Window 才是对的。
         Window("Mailingo", id: "main") {
             RootView(model: model)
-                // 最小尺寸放低一些，让窗口能真的缩小；内部各区域靠
-                // VSplitView / HSplitView 自适应，不需要靠"大最小尺寸"兜底。
-                .frame(minWidth: 820, minHeight: 520)
+                // 最小尺寸刻意放得很低：实际用法是把 Mail 与 Mailingo
+                // **并排塞进同一个全屏空间**，半屏宽约等于屏幕宽的一半
+                // （本机 1470/2 ≈ 735pt），窗口必须能缩得比它更小。
+                // 内部各区域靠 VSplitView / HSplitView 自适应，
+                // 工具栏在窄宽度下会折成两行（ViewThatFits）。
+                .frame(minWidth: 480, minHeight: 420)
         }
         .defaultSize(width: 1240, height: 840)
         .windowResizability(.contentMinSize)
