@@ -12,19 +12,19 @@ final class HTMLPipelineTests: XCTestCase {
     func testSplicePreservesEveryNonTextByte() throws {
         for fixture in [Fixtures.realSinglepartHTML, Fixtures.alternativeQP] {
             let analysis = try EmailInspector.analyze(rawMessage: Fixtures.data(fixture))
-            let inspection = EmailInspector.apply(
+            let inspection = try EmailInspector.apply(
                 translations: markerTranslations(for: analysis),
                 to: analysis
             )
 
             XCTAssertEqual(
-                HTMLTokenizer.skeleton(of: analysis.originalHTML),
-                HTMLTokenizer.skeleton(of: inspection.splicedHTML),
+                try HTMLTokenizer.skeleton(of: analysis.originalHTML),
+                try HTMLTokenizer.skeleton(of: inspection.splicedHTML),
                 "[\(fixture)] 非文本字节被改动了"
             )
             XCTAssertEqual(
-                HTMLTokenizer.tagSequence(in: analysis.originalHTML),
-                HTMLTokenizer.tagSequence(in: inspection.splicedHTML),
+                try HTMLTokenizer.tagSequence(in: analysis.originalHTML),
+                try HTMLTokenizer.tagSequence(in: inspection.splicedHTML),
                 "[\(fixture)] 标签序列被改动了"
             )
             XCTAssertGreaterThan(inspection.segments.count, 0, "[\(fixture)] 一个片段都没提取到")
@@ -34,7 +34,7 @@ final class HTMLPipelineTests: XCTestCase {
     /// 跑一遍自检 API，确认它自己也是通过的（避免自检逻辑本身是坏的）。
     func testRuntimeFidelityReportIsClean() throws {
         let analysis = try EmailInspector.analyze(rawMessage: Fixtures.data(Fixtures.realSinglepartHTML))
-        let inspection = EmailInspector.apply(translations: markerTranslations(for: analysis), to: analysis)
+        let inspection = try EmailInspector.apply(translations: markerTranslations(for: analysis), to: analysis)
 
         XCTAssertTrue(inspection.fidelity.nonTextBytesIdentical, inspection.fidelity.detail)
         XCTAssertTrue(inspection.fidelity.tagSequenceIdentical, inspection.fidelity.detail)
@@ -57,43 +57,43 @@ final class HTMLPipelineTests: XCTestCase {
     }
 
     /// 没有任何文本节点的 HTML，切片必须原样返回（属性测试的定性版本）。
-    func testHTMLWithoutTextNodesIsUnchanged() {
+    func testHTMLWithoutTextNodesIsUnchanged() throws {
         let html = #"<table><tr><td><img src="a.png"></td><td></td></tr></table>"#
-        let segments = SegmentExtractor.extract(from: html)
+        let segments = try SegmentExtractor.extract(from: html)
         XCTAssertTrue(segments.isEmpty)
         XCTAssertEqual(HTMLSplicer.splice(html: html, segments: segments, translations: [:]), html)
     }
 
     // MARK: - 该跳过的必须跳过
 
-    func testScriptAndStyleContentIsNeverExtracted() {
+    func testScriptAndStyleContentIsNeverExtracted() throws {
         let html = """
         <html><head><style>.a{color:red}</style>
         <script>var greeting = "translate me not";</script></head>
         <body><p>Translate me</p></body></html>
         """
-        let texts = SegmentExtractor.extract(from: html).map(\.sourceText)
+        let texts = try SegmentExtractor.extract(from: html).map(\.sourceText)
         XCTAssertEqual(texts, ["Translate me"])
     }
 
-    func testCommentAndConditionalCommentAreUntouched() {
+    func testCommentAndConditionalCommentAreUntouched() throws {
         let html = #"<!--[if mso]><table><tr><td><![endif]--><p>Hello</p><!--[if mso]></td></tr></table><![endif]-->"#
         let analysis = EmailAnalysis(
             decoded: DecodedEmail(),
             originalHTML: html,
             usedPlainTextFallback: false,
-            segments: SegmentExtractor.extract(from: html)
+            segments: try SegmentExtractor.extract(from: html)
         )
-        let spliced = EmailInspector.apply(translations: markerTranslations(for: analysis), to: analysis).splicedHTML
+        let spliced = try EmailInspector.apply(translations: markerTranslations(for: analysis), to: analysis).splicedHTML
 
         XCTAssertTrue(spliced.contains("<!--[if mso]><table><tr><td><![endif]-->"))
         XCTAssertTrue(spliced.contains("<!--[if mso]></td></tr></table><![endif]-->"))
         XCTAssertFalse(spliced.contains("Hello"))
     }
 
-    func testAttributesAreNeverRewritten() {
+    func testAttributesAreNeverRewritten() throws {
         let html = #"<a href="https://x.test/?a=1&amp;b=2" class="btn" data-id="7" style="color:red">Click</a>"#
-        let segments = SegmentExtractor.extract(from: html)
+        let segments = try SegmentExtractor.extract(from: html)
         let spliced = HTMLSplicer.splice(html: html, segments: segments, translations: [0: "点击"])
 
         XCTAssertTrue(spliced.contains(#"href="https://x.test/?a=1&amp;b=2""#))
@@ -102,18 +102,18 @@ final class HTMLPipelineTests: XCTestCase {
         XCTAssertTrue(spliced.contains(">点击</a>"))
     }
 
-    func testPlainNumbersAndURLsAreNotTranslated() {
+    func testPlainNumbersAndURLsAreNotTranslated() throws {
         let html = """
         <p>2026</p><p>--</p><p>https://example.com/a?b=1</p><p>user@example.com</p><p>Real text</p>
         """
-        XCTAssertEqual(SegmentExtractor.extract(from: html).map(\.sourceText), ["Real text"])
+        XCTAssertEqual(try SegmentExtractor.extract(from: html).map(\.sourceText), ["Real text"])
     }
 
     // MARK: - 空白与实体
 
-    func testWhitespaceBetweenInlineTagsIsPreserved() {
+    func testWhitespaceBetweenInlineTagsIsPreserved() throws {
         let html = "<p><b>Hello</b> <i>world</i></p>"
-        let segments = SegmentExtractor.extract(from: html)
+        let segments = try SegmentExtractor.extract(from: html)
         XCTAssertEqual(segments.map(\.sourceText), ["Hello", "world"])
 
         let spliced = HTMLSplicer.splice(
@@ -125,9 +125,9 @@ final class HTMLPipelineTests: XCTestCase {
         XCTAssertEqual(spliced, "<p><b>你好</b> <i>世界</i></p>")
     }
 
-    func testEntitiesAreDecodedThenReescaped() {
+    func testEntitiesAreDecodedThenReescaped() throws {
         let html = "<p>Tom &amp; Jerry &lt;3 caf&eacute; &nbsp;end</p>"
-        let segments = SegmentExtractor.extract(from: html)
+        let segments = try SegmentExtractor.extract(from: html)
         XCTAssertEqual(segments.count, 1)
         // 注意 `café` 与 `&nbsp;` 之间那个**普通空格**要保留，
         // 它和 nbsp 是两个不同的空白字符，不能混为一谈。
@@ -141,15 +141,15 @@ final class HTMLPipelineTests: XCTestCase {
         XCTAssertEqual(spliced, "<p>汤姆 &amp; 杰瑞 &lt;3 咖啡 &nbsp;结束</p>")
     }
 
-    func testUnknownEntityIsLeftAlone() {
+    func testUnknownEntityIsLeftAlone() throws {
         XCTAssertEqual(HTMLEntities.decode("a &weirdthing; b"), "a &weirdthing; b")
         XCTAssertEqual(HTMLEntities.decode("&#65;&#x42;"), "AB")
     }
 
     /// 未闭合的 `<` 不能把后面的正文整段吃掉。
-    func testUnclosedAngleBracketDoesNotSwallowTheRest() {
+    func testUnclosedAngleBracketDoesNotSwallowTheRest() throws {
         let html = "<p>a < b</p><p>second</p>"
-        let texts = SegmentExtractor.extract(from: html).map(\.sourceText)
+        let texts = try SegmentExtractor.extract(from: html).map(\.sourceText)
         XCTAssertTrue(texts.contains("second"), "第二个段落被吞掉了：\(texts)")
     }
 
@@ -160,7 +160,7 @@ final class HTMLPipelineTests: XCTestCase {
     /// 所以图片相关的断言放到带图片的合成 fixture 上（见下一个测试）。
     func testMarkerSplicedRealFixtureKeepsStructureAndInsertsMarkers() throws {
         let analysis = try EmailInspector.analyze(rawMessage: Fixtures.data(Fixtures.realSinglepartHTML))
-        let inspection = EmailInspector.apply(translations: markerTranslations(for: analysis), to: analysis)
+        let inspection = try EmailInspector.apply(translations: markerTranslations(for: analysis), to: analysis)
 
         XCTAssertFalse(inspection.usedPlainTextFallback)
         XCTAssertGreaterThan(inspection.segments.count, 0)
@@ -180,7 +180,7 @@ final class HTMLPipelineTests: XCTestCase {
     /// 带图片、条件注释和按钮的营销邮件：切片后这些必须原样都在。
     func testMarkerSplicedMarketingFixtureKeepsImagesAndConditionalComments() throws {
         let analysis = try EmailInspector.analyze(rawMessage: Fixtures.data(Fixtures.alternativeQP))
-        let inspection = EmailInspector.apply(translations: markerTranslations(for: analysis), to: analysis)
+        let inspection = try EmailInspector.apply(translations: markerTranslations(for: analysis), to: analysis)
 
         XCTAssertTrue(inspection.splicedHTML.contains("<img"))
         XCTAssertTrue(inspection.splicedHTML.contains("<!--[if mso]>"))
@@ -191,6 +191,28 @@ final class HTMLPipelineTests: XCTestCase {
     }
 
     // MARK: - 辅助
+
+    // MARK: - 保真自检的"只分词一趟"优化
+
+    /// 从已有分词结果拼出来的骨架，必须和重新分词得到的**完全一致**。
+    ///
+    /// 保真自检原先对每份 HTML 分三趟（skeleton 内部一趟、直接又一趟，
+    /// 外加 tagSequence），一封 287 KB 的邮件因此白烧约 0.8 秒。
+    /// 现在改成每份只分一趟、骨架和文本都从这一趟里出 ——
+    /// 这个用例就是钉住"优化没有改变结果"。
+    func testSkeletonFromRunsMatchesSkeletonOfHTML() throws {
+        for fixture in [Fixtures.realSinglepartHTML, Fixtures.alternativeQP] {
+            let html = try EmailInspector
+                .analyze(rawMessage: Fixtures.data(fixture))
+                .originalHTML
+
+            XCTAssertEqual(
+                HTMLTokenizer.skeleton(from: try HTMLTokenizer.textRuns(in: html), in: html),
+                try HTMLTokenizer.skeleton(of: html),
+                "[\(fixture)] 复用分词结果拼出的骨架与重新分词不一致"
+            )
+        }
+    }
 
     private func markerTranslations(for analysis: EmailAnalysis) -> [Int: String] {
         Dictionary(uniqueKeysWithValues: analysis.segments.map { ($0.id, "〖\($0.id)〗") })

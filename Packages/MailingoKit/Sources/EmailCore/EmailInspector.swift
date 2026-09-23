@@ -61,15 +61,18 @@ public enum EmailInspector {
             decoded: decoded,
             originalHTML: html,
             usedPlainTextFallback: usedFallback,
-            segments: SegmentExtractor.extract(from: html)
+            segments: try SegmentExtractor.extract(from: html)
         )
     }
 
     /// 把译文写回，并做保真自检。
+    /// - Throws: `CancellationError` —— 切片本身很便宜（实测 287 KB 只要
+    ///   0.3 ms），但保真自检要分词，那才是大头。调用方不再需要结果时会
+    ///   取消这个任务，抛出去让上层丢弃即可。
     public static func apply(
         translations: [Int: String],
         to analysis: EmailAnalysis
-    ) -> EmailInspection {
+    ) throws -> EmailInspection {
         let spliced = HTMLSplicer.splice(
             html: analysis.originalHTML,
             segments: analysis.segments,
@@ -81,7 +84,10 @@ public enum EmailInspector {
             usedPlainTextFallback: analysis.usedPlainTextFallback,
             segments: analysis.segments,
             splicedHTML: spliced,
-            fidelity: HTMLSplicer.verifyFidelity(original: analysis.originalHTML, spliced: spliced)
+            fidelity: try HTMLSplicer.verifyFidelity(
+                original: analysis.originalHTML,
+                spliced: spliced
+            )
         )
     }
 

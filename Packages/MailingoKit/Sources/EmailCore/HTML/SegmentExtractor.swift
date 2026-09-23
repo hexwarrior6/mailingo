@@ -45,8 +45,8 @@ enum SegmentExtractor {
         "etc", "eg", "ie", "aka", "vs"
     ]
 
-    static func extract(from html: String) -> [TranslationSegment] {
-        let runs = HTMLTokenizer.textRuns(in: html)
+    static func extract(from html: String) throws -> [TranslationSegment] {
+        let runs = try HTMLTokenizer.textRuns(in: html)
         var segments: [TranslationSegment] = []
 
         for (index, run) in runs.enumerated() {

@@ -587,7 +587,10 @@ final class InspectorModel: ObservableObject {
 
         guard !segments.isEmpty else {
             guard runToken == token else { return }
-            inspection = await applyOffMainThread(translations: [:], to: analysis)
+            // `apply` 只可能因被取代而抛；`translate` 本身不抛，就地消化
+            guard let applied = try? await applyOffMainThread(translations: [:], to: analysis)
+            else { return }
+            inspection = applied
             translationStatus = .failed("这封邮件没有提取到可翻译的片段")
             return
         }
@@ -613,9 +616,10 @@ final class InspectorModel: ObservableObject {
         if !ignoringCache,
            let cached = await TranslationCache.shared.lookup(cacheKey, sourceHash: sourceHash),
            !cached.isEmpty {
-            // 守卫要在 await **之后**再对一次：apply 要跑 1.5 秒，
-            // 中间足够用户切走，过期结果绝不能落地
-            let applied = await applyOffMainThread(translations: cached, to: analysis)
+            // 守卫要在 await **之后**再对一次：apply 要分词，一封 287 KB 的
+            // 邮件就要几百毫秒，中间足够用户切走，过期结果绝不能落地。
+            guard let applied = try? await applyOffMainThread(translations: cached, to: analysis)
+            else { return }
             guard runToken == token else { return }
             inspection = applied
             translationStatus = .idle
@@ -652,7 +656,7 @@ final class InspectorModel: ObservableObject {
             guard runToken == token else { return }
             cacheStatus = .stored
 
-            let applied = await applyOffMainThread(translations: translations, to: analysis)
+            let applied = try await applyOffMainThread(translations: translations, to: analysis)
             guard runToken == token else { return }
             inspection = applied
             translationStatus = .idle
@@ -662,7 +666,11 @@ final class InspectorModel: ObservableObject {
             guard runToken == token else { return }
             // 失败时仍然把原文渲染出来，并把原因讲清楚 ——
             // 总比一个空窗格好，用户至少能看到邮件内容。
-            let applied = await applyOffMainThread(translations: [:], to: analysis)
+            //
+            // 用 `try?`：这里已经在 catch 里、而 `translate` 本身不抛，
+            // 所以只能就地消化。apply 唯一的失败原因是被取代 —— 那就什么都不写。
+            guard let applied = try? await applyOffMainThread(translations: [:], to: analysis)
+            else { return }
             guard runToken == token else { return }
             inspection = applied
             translationStatus = .failed(Self.describe(error))
@@ -707,7 +715,7 @@ final class InspectorModel: ObservableObject {
         // 注意顺序：**占位算好之前不能离开 .loading**。否则那 1.5 秒里
         // state 是 .loaded、而 inspection 还是上一封的 —— 界面就会显示
         // 上一封的内容，正是"一闪而过"那种观感。
-        let placeholder = await applyOffMainThread(translations: [:], to: analysis)
+        let placeholder = try await applyOffMainThread(translations: [:], to: analysis)
         guard loadToken == token else { return }
 
         self.analysis = analysis
@@ -748,16 +756,21 @@ final class InspectorModel: ObservableObject {
     /// 每封邮件它会被调用两次（先用空译文占位、译文回来再写一次），
     /// 所以那封邮件实际冻了约 3 秒。
     ///
-    /// 这里不接取消：`apply` 是非 throwing 的纯函数，中途停下只会返回一个
-    /// 错的结果。反正它在后台跑、不挡界面，过期的结果由调用方按
-    /// `runToken` / `loadToken` 丢弃就行。
+    /// **可以取消**：`apply` 里最贵的是保真自检的两趟分词（每份 HTML 一趟），
+    /// 一封 287 KB 的邮件要 ~785 ms。用户切走后这份结果就没用了，取消掉能
+    /// 立刻把那半个核还回来。`textRuns` / `tagSequence` 里都埋了取消检查。
     private func applyOffMainThread(
         translations: [Int: String],
         to analysis: EmailAnalysis
-    ) async -> EmailInspection {
-        await Task.detached(priority: .userInitiated) {
-            EmailInspector.apply(translations: translations, to: analysis)
-        }.value
+    ) async throws -> EmailInspection {
+        let task = Task.detached(priority: .userInitiated) {
+            try EmailInspector.apply(translations: translations, to: analysis)
+        }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     private static func describe(_ error: Error) -> String {

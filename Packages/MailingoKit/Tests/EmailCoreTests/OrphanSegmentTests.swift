@@ -18,7 +18,7 @@ final class OrphanSegmentTests: XCTestCase {
 
     func testPrepositionBetweenBoldNumbersIsMarkedOrphan() throws {
         let html = "<p>Meeting from <b>9:00</b> to <b>11:00</b></p>"
-        let segments = SegmentExtractor.extract(from: html)
+        let segments = try SegmentExtractor.extract(from: html)
 
         let orphan = try XCTUnwrap(segments.first { $0.sourceText == "to" })
         XCTAssertTrue(orphan.isContextlessOrphan, "夹在两个加粗时间之间的 to 应被标记为孤立片段")
@@ -34,7 +34,7 @@ final class OrphanSegmentTests: XCTestCase {
 
     func testOrdinalSuffixInSuperscriptIsMarkedOrphan() throws {
         let html = "<p>Due on 14<sup>th</sup> March</p>"
-        let segments = SegmentExtractor.extract(from: html)
+        let segments = try SegmentExtractor.extract(from: html)
 
         let orphan = try XCTUnwrap(segments.first { $0.sourceText == "th" })
         XCTAssertTrue(orphan.isContextlessOrphan, "上标里的 th 是序数后缀，不是词")
@@ -45,10 +45,10 @@ final class OrphanSegmentTests: XCTestCase {
 
     // MARK: - 不能误伤：短词但独占一块，是有语境的
 
-    func testStandaloneShortWordsAreNotOrphans() {
+    func testStandaloneShortWordsAreNotOrphans() throws {
         // 这些短词自己就是一句话，必须照常翻译
         for html in ["<button>No</button>", "<p>Save</p>", "<td>Yes</td>", "<a>Next</a>"] {
-            let segments = SegmentExtractor.extract(from: html)
+            let segments = try SegmentExtractor.extract(from: html)
             XCTAssertEqual(segments.count, 1, html)
             XCTAssertFalse(segments[0].isContextlessOrphan, "\(html) 不该被判为孤立片段")
         }
@@ -59,24 +59,24 @@ final class OrphanSegmentTests: XCTestCase {
     func testMeaningfulShortWordBesideSiblingsIsNotOrphan() throws {
         // 注意 to 要**独立成一个文本节点**（两边都有标签）才谈得上"被切开"
         let html = "<p>Click <b>Save</b> to <b>continue</b></p>"
-        let segments = SegmentExtractor.extract(from: html)
+        let segments = try SegmentExtractor.extract(from: html)
 
         XCTAssertFalse(try XCTUnwrap(segments.first { $0.sourceText == "Save" }).isContextlessOrphan)
         XCTAssertTrue(try XCTUnwrap(segments.first { $0.sourceText == "to" }).isContextlessOrphan)
     }
 
     /// 中文没有这种问题 —— CJK 短词单独翻也是对的，不能误伤。
-    func testCJKShortWordsAreNeverOrphans() {
+    func testCJKShortWordsAreNeverOrphans() throws {
         let html = "<p>会议<sup>的</sup>安排</p>"
-        for segment in SegmentExtractor.extract(from: html) {
+        for segment in try SegmentExtractor.extract(from: html) {
             XCTAssertFalse(segment.isContextlessOrphan, "\(segment.sourceText) 不该被判为孤立片段")
         }
     }
 
     /// 跨块级容器不算兄弟：两个 `<p>` 里各一个 "to"，各自都是完整语境。
-    func testSameWordInDifferentBlocksIsNotOrphan() {
+    func testSameWordInDifferentBlocksIsNotOrphan() throws {
         let html = "<p>to</p><p>to</p>"
-        for segment in SegmentExtractor.extract(from: html) {
+        for segment in try SegmentExtractor.extract(from: html) {
             XCTAssertFalse(segment.isContextlessOrphan)
         }
     }
@@ -85,7 +85,7 @@ final class OrphanSegmentTests: XCTestCase {
 
     func testBlockAncestorIsRecorded() throws {
         let html = "<p>a <b>b</b></p><td>c</td><li>d</li>"
-        let segments = SegmentExtractor.extract(from: html)
+        let segments = try SegmentExtractor.extract(from: html)
 
         XCTAssertEqual(try XCTUnwrap(segments.first { $0.sourceText == "a" }).blockAncestor, "p")
         XCTAssertEqual(try XCTUnwrap(segments.first { $0.sourceText == "b" }).blockAncestor, "p")
@@ -103,7 +103,7 @@ final class OrphanSegmentTests: XCTestCase {
             decoded: DecodedEmail(),
             originalHTML: html,
             usedPlainTextFallback: false,
-            segments: SegmentExtractor.extract(from: html)
+            segments: try SegmentExtractor.extract(from: html)
         )
 
         // 引擎看不到上下文时，管线只会把这些片段送出去
@@ -111,20 +111,20 @@ final class OrphanSegmentTests: XCTestCase {
         XCTAssertFalse(sent.contains { $0.sourceText == "to" })
 
         let translations = Dictionary(uniqueKeysWithValues: sent.map { ($0.id, "会议从") })
-        let spliced = EmailInspector.apply(translations: translations, to: analysis).splicedHTML
+        let spliced = try EmailInspector.apply(translations: translations, to: analysis).splicedHTML
 
         XCTAssertEqual(spliced, "<p>会议从 <b>9:00</b> to <b>11:00</b></p>")
         // 保真保证不受影响
         XCTAssertEqual(
-            HTMLTokenizer.skeleton(of: html),
-            HTMLTokenizer.skeleton(of: spliced)
+            try HTMLTokenizer.skeleton(of: html),
+            try HTMLTokenizer.skeleton(of: spliced)
         )
     }
 
     /// 有上下文的引擎（LLM）应该拿到全部片段，包括孤立虚词。
     func testEngineWithFullContextReceivesEverySegment() throws {
         let html = "<p>Meeting from <b>9:00</b> to <b>11:00</b></p>"
-        let segments = SegmentExtractor.extract(from: html)
+        let segments = try SegmentExtractor.extract(from: html)
 
         let all = segments.filter { _ in true }                       // LLM：全给
         let withoutOrphans = segments.filter { !$0.isContextlessOrphan } // Apple：剔除

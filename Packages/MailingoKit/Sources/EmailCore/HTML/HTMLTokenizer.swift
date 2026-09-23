@@ -71,19 +71,34 @@ struct HTMLTokenizer {
     ]
 
     /// 取出所有文本节点。
-    static func textRuns(in html: String) -> [TextRun] {
+    ///
+    /// 可以取消：这是一趟 O(n) 扫描，一封 287 KB 的 HTML 要 ~380 ms。
+    /// 调用方（App 在快速切邮件时）会在结果不再需要时取消它，
+    /// 所以这里每隔一段就查一次，让旧的活能提前停。
+    static func textRuns(in html: String) throws -> [TextRun] {
         var runs: [TextRun] = []
         var stack: [OpenElement] = []
         var i = html.startIndex
 
         while i < html.endIndex {
+            try Task.checkCancellation()
             let ch = html[i]
 
             guard ch == "<" else {
                 // ── 文本节点：一路走到下一个 '<'
+                //
+                // 单个文本节点可能很长（一封信的正文就是一整段），所以这里也
+                // 要查取消 —— 光靠外层的"每个 token 查一次"在一段超长文本里
+                // 会漏掉。按字符数计数，而不是每字符都查（那会把扫描拖慢）。
                 var j = i
+                var scanned = 0
                 while j < html.endIndex, html[j] != "<" {
                     j = html.index(after: j)
+                    scanned += 1
+                    if scanned >= 8192 {
+                        try Task.checkCancellation()
+                        scanned = 0
+                    }
                 }
                 runs.append(TextRun(
                     range: i..<j,
@@ -172,10 +187,27 @@ struct HTMLTokenizer {
     ///
     /// 用来做保真自检 —— 切片前后骨架必须完全一致，等价于
     /// 「非文本字节 100% 未变」这条 §6 的强断言。
-    static func skeleton(of html: String, placeholder: Character = "\u{FFFC}") -> String {
+    static func skeleton(of html: String, placeholder: Character = "\u{FFFC}") throws -> String {
+        try skeleton(from: try textRuns(in: html), in: html, placeholder: placeholder)
+    }
+
+    /// 从**已经算好的**文本节点拼骨架。
+    ///
+    /// 存在的意义就是省掉重复分词：保真自检既要骨架、又要文本内容，
+    /// 两者来自同一趟 `textRuns`。早先 `skeleton(of:)` 内部自己再跑一趟，
+    /// 于是一封 287 KB 的邮件白烧了 380 ms —— 实测那一趟占了整个
+    /// `apply` 的四分之一。
+    ///
+    /// 传进来的 `runs` 必须来自同一份 `html`，否则拼出来的骨架没有意义。
+    static func skeleton(
+        from runs: [TextRun],
+        in html: String,
+        placeholder: Character = "\u{FFFC}"
+    ) -> String {
         var out = ""
+        out.reserveCapacity(html.count)
         var cursor = html.startIndex
-        for run in textRuns(in: html) {
+        for run in runs {
             out += html[cursor..<run.range.lowerBound]
             out.append(placeholder)
             cursor = run.range.upperBound
@@ -185,11 +217,12 @@ struct HTMLTokenizer {
     }
 
     /// 标签序列（含属性原文），用于断言结构未变。
-    static func tagSequence(in html: String) -> [String] {
+    static func tagSequence(in html: String) throws -> [String] {
         var tags: [String] = []
         var i = html.startIndex
 
         while i < html.endIndex {
+            try Task.checkCancellation()
             guard let lt = html[i...].firstIndex(of: "<") else { break }
 
             if html[lt...].hasPrefix("<!--") {

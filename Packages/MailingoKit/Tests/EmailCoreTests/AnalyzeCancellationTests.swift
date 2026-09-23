@@ -49,6 +49,42 @@ final class AnalyzeCancellationTests: XCTestCase {
         XCTAssertFalse(analysis.originalHTML.isEmpty)
     }
 
+    /// **保真自检也要能取消** —— 它才是 `apply` 里最贵的一步。
+    ///
+    /// 实测一封 287 KB 的 HTML，`apply` 要 ~785 ms，其中几乎全是保真自检的
+    /// 两趟分词。用户切走后这份结果就没用了，能提前停就等于半个核。
+    func testApplyHonorsCancellation() async throws {
+        let data = try Fixtures.data(Fixtures.alternativeQP)
+        let analysis = try EmailInspector.analyze(rawMessage: data)
+
+        let task = Task.detached { () -> Error? in
+            withUnsafeCurrentTask { $0?.cancel() }
+            do {
+                _ = try EmailInspector.apply(translations: [:], to: analysis)
+                return nil
+            } catch {
+                return error
+            }
+        }
+
+        let error = await task.value
+        XCTAssertTrue(
+            error is CancellationError,
+            "取消后 apply 应当抛 CancellationError，实际是：\(String(describing: error))"
+        )
+    }
+
+    /// 反向用例：没取消时 `apply` 必须照常出结果，且保真断言仍然成立。
+    func testApplyStillSucceedsWhenNotCancelled() throws {
+        let data = try Fixtures.data(Fixtures.alternativeQP)
+        let analysis = try EmailInspector.analyze(rawMessage: data)
+        let inspection = try EmailInspector.apply(translations: [:], to: analysis)
+
+        XCTAssertTrue(inspection.fidelity.nonTextBytesIdentical, inspection.fidelity.detail)
+        XCTAssertTrue(inspection.fidelity.tagSequenceIdentical, inspection.fidelity.detail)
+        XCTAssertFalse(inspection.splicedHTML.isEmpty)
+    }
+
     /// 取消也要能穿过 fixture 里那份 GB2312/GKB 邮件 ——
     /// 解码是最长的一步，取消应当在它之前就生效。
     func testCancellationAppliesToEveryFixture() throws {
