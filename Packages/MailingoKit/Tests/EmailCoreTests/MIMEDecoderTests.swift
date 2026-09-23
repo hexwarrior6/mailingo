@@ -60,6 +60,24 @@ final class MIMEDecoderTests: XCTestCase {
         XCTAssertEqual([UInt8](resource.data.prefix(4)), [0x89, 0x50, 0x4E, 0x47])
     }
 
+    // MARK: - 声明 gb2312、实际是 GBK
+
+    /// 端到端：整封邮件走一遍，中文必须解出来、且不能出现 Latin-1 兜底的乱码。
+    ///
+    /// 这是上面 `testGB2312BodyContainingGBKOnlyByteStillDecodes` 的真实邮件版 ——
+    /// 单元测试保证了解码函数对，这个保证的是**整条链路上没有别的地方把它又毁掉**。
+    func testGB2312DeclaredButGBKEncodedMessageDecodes() throws {
+        let decoded = try decoder.decode(Fixtures.data(Fixtures.gb2312DeclaredGBKActual))
+
+        // 这封是 text/plain（合成 HTML 由上层做，不在这里）
+        let text = try XCTUnwrap(decoded.plainText)
+        XCTAssertTrue(text.contains("锐捷网络南洋理工专场宣讲会"),
+                      "中文没解出来，实际开头：\(text.prefix(120))")
+        XCTAssertTrue(text.contains("–"), "GBK 独有的短破折号丢了")
+        XCTAssertFalse(text.contains("Èñ"), "掉进了 Latin-1 兜底")
+        XCTAssertFalse(text.contains("¡ª"), "掉进了 Latin-1 兜底")
+    }
+
     // MARK: - 超长头部区
 
     /// 真实 Exchange 邮件的头部区可以超过 8KB。任何"只看前 8KB"的实现都会踩空，

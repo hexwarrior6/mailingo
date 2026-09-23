@@ -9,6 +9,47 @@ import XCTest
 /// 合并成一处之后用这些测试钉住 —— 两个坑各自都有专门的用例。
 final class MIMEHeadersTests: XCTestCase {
 
+    // MARK: - charset 超集回退（真实缺陷，2026-09-24）
+
+    /// **声明 gb2312、正文里却有 GBK 独有的字节**时必须仍能解出来。
+    ///
+    /// 实测的真实邮件：2260 字节的正文里只有一个 `A8 43`（GBK 的短破折号
+    /// 「–」，GB2312 里没有这个码位）。而 `String(data:encoding:)` 是
+    /// **全有或全无**的 —— 这一个字节让整段返回 nil，接着掉进 Latin-1 兜底，
+    /// 整篇中文变成「Èñ½ÝÍøÂç」。实测击中了 6 封真实邮件。
+    func testGB2312BodyContainingGBKOnlyByteStillDecodes() {
+        // 「锐捷网络」+ GBK 独有的「–」(A8 43)
+        let bytes = Data([0xC8, 0xF1, 0xBD, 0xDD, 0xCD, 0xF8, 0xC2, 0xE7, 0xA8, 0x43])
+        XCTAssertEqual(MIMEHeaders.decodeText(bytes, charset: "gb2312"), "锐捷网络–")
+    }
+
+    /// 超集回退只在**严格解失败**时才发生 —— 能解的邮件行为必须一字不变。
+    func testStrictCharsetDecodeStillWins() {
+        let bytes = Data([0xC8, 0xF1, 0xBD, 0xDD, 0xCD, 0xF8, 0xC2, 0xE7])
+        XCTAssertEqual(MIMEHeaders.decodeText(bytes, charset: "gb2312"), "锐捷网络")
+        // 名字大小写与首尾空白都要被规范化
+        XCTAssertEqual(MIMEHeaders.decodeText(bytes, charset: "GBK"), "锐捷网络")
+        XCTAssertEqual(MIMEHeaders.decodeText(bytes, charset: "  GB2312  "), "锐捷网络")
+    }
+
+    /// 认不出的 charset 仍然走原来的兜底，不会被超集表牵连。
+    func testUnknownCharsetKeepsItsFallback() {
+        XCTAssertEqual(MIMEHeaders.decodeText(Data("hello".utf8), charset: "x-nope"), "hello")
+        // 非 UTF-8 的高位字节最终按 Latin-1 解 —— 这是刻意保留的最后一档
+        XCTAssertEqual(MIMEHeaders.decodeText(Data([0xE9]), charset: "x-nope"), "é")
+        XCTAssertEqual(MIMEHeaders.decodeText(Data([0xE9]), charset: ""), "é")
+    }
+
+    /// 繁体中文同族也要退到超集。
+    ///
+    /// `A1 AA` 在 Apple 的 big5 实现里解不出来、在 big5-hkscs 里可以 ——
+    /// 如果回退没生效，它就会掉进 Latin-1 变成「¡ª」。
+    func testBig5FallsBackToHKSCS() {
+        let text = MIMEHeaders.decodeText(Data([0xA1, 0xAA]), charset: "big5")
+        XCTAssertNotNil(text)
+        XCTAssertNotEqual(text, "¡ª", "掉进 Latin-1 兜底，说明没有回退到 big5-hkscs")
+    }
+
     // MARK: - 行尾：这是踩过的坑之一
 
     /// CRLF 必须能正确切分。

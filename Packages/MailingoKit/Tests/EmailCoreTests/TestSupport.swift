@@ -20,6 +20,9 @@ enum Fixtures {
     static let headerHeavy = "synthetic-header-heavy.eml"
     /// 合成：只有 `text/plain`。
     static let plainOnly = "synthetic-plain-only.eml"
+    /// 合成：**声明 gb2312、正文实际含 GBK 独有字节**（A8 43 = 短破折号）。
+    /// 用来钉住"一个字节让整段解码返回 nil、整篇中文变乱码"这个真实缺陷。
+    static let gb2312DeclaredGBKActual = "synthetic-gb2312-declared-gbk-actual.eml"
 
     static func data(_ name: String) throws -> Data {
         let file = (name as NSString).deletingPathExtension

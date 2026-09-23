@@ -211,16 +211,59 @@ public enum MIMEHeaders {
     }
 
     /// 按 IANA charset 名解码文本。
+    ///
+    /// **顺序很关键**：先按声明的 charset 严格解，只有解不出来才退到同族的超集。
+    /// 这样本来能解的邮件行为完全不变，只有原本就会变成乱码的邮件才受影响。
+    ///
+    /// ## 为什么需要超集这一步（实测，2026-09-24，真实邮件）
+    ///
+    /// 一封邮件声明 `charset="gb2312"`，2260 字节的正文里却有**一个** GBK 才有的
+    /// 字节序列 `A8 43`（GB18030 解作「–」）。而 `String(data:encoding:)` 是
+    /// **全有或全无**的：这一个字节让整段正文返回 nil，于是掉进 Latin-1 兜底，
+    /// 整篇中文变成「Èñ½ÝÍøÂç」这样的乱码 —— 实测 6 封真实邮件中招。
+    ///
+    /// "声明 gb2312、实际发 GBK" 在中文邮件里极其常见，因为 GB2312 是 GBK 的子集，
+    /// 而几乎所有邮件客户端都按 GBK/GB18030 编码。所以 gb2312/gbk 一律退到
+    /// gb18030 —— 它是 GBK 的**严格超集**，同一字节序列的解读不存在歧义。
     static func decodeText(_ data: Data, charset: String) -> String? {
         let name = charset.trimmingCharacters(in: .whitespaces).lowercased()
-        if !name.isEmpty,
-           let cfEncoding = CFStringConvertIANACharSetNameToEncoding(name as CFString) as CFStringEncoding?,
-           cfEncoding != kCFStringEncodingInvalidId {
-            let nsEncoding = CFStringConvertEncodingToNSStringEncoding(cfEncoding)
-            if let text = String(data: data, encoding: String.Encoding(rawValue: nsEncoding)) {
-                return text
-            }
+
+        // ① 按声明的 charset 严格解
+        if let text = strictDecode(data, ianaName: name) { return text }
+
+        // ② 解不出来才退到同族超集
+        for superset in supersets(for: name) {
+            if let text = strictDecode(data, ianaName: superset) { return text }
         }
+
+        // ③ 最后兜底：UTF-8，再不行按 Latin-1（它永不失败，因此是终点）
         return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
+    }
+
+    /// 严格解码：认不出 charset 名、或字节里有该编码不接受的内容，都返回 nil。
+    private static func strictDecode(_ data: Data, ianaName: String) -> String? {
+        guard !ianaName.isEmpty else { return nil }
+        let cfEncoding = CFStringConvertIANACharSetNameToEncoding(ianaName as CFString)
+        guard cfEncoding != kCFStringEncodingInvalidId else { return nil }
+        let nsEncoding = CFStringConvertEncodingToNSStringEncoding(cfEncoding)
+        return String(data: data, encoding: String.Encoding(rawValue: nsEncoding))
+    }
+
+    /// 某个 charset 解不出来时可以尝试的同族超集。
+    ///
+    /// 只列**严格超集**（老编码能表示的，超集都能表示，且解读一致）。
+    /// 故意不收 shift_jis → windows-31j：CP932 虽然覆盖面更大，但对少数码位的
+    /// 映射与 JIS X 0208 不同，会对**本来解得好好的**邮件悄悄改字。
+    private static func supersets(for name: String) -> [String] {
+        switch name {
+        case "gb2312", "gbk", "gb_2312", "gb_2312-80", "csgb2312", "euc-cn", "x-gbk", "chinese":
+            return ["gb18030"]
+        case "big5", "csbig5", "big-5":
+            return ["big5-hkscs"]
+        case "euc-kr", "cseuckr":
+            return ["windows-949"]
+        default:
+            return []
+        }
     }
 }
