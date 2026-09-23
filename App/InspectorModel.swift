@@ -440,7 +440,7 @@ final class InspectorModel: ObservableObject {
 
             guard !followSuppressed else {
                 mailFollowStatus = .following
-                trace.notice("跟随被抑制（用户手动选过）→ 这次不切")
+                trace.debug("跟随被抑制（用户手动选过）→ 这次不切")
                 return
             }
 
@@ -453,10 +453,10 @@ final class InspectorModel: ObservableObject {
             }
 
             mailFollowStatus = .following
-            guard message.id != currentMessage?.id else {
-                trace.notice("Mail 选中的就是当前这封 → 不用切")
-                return
-            }
+            // 稳态（选中的就是当前这封）**刻意不打日志** —— 它每 0.5 秒
+            // 就会来一次，打出来只会把真正有用的行淹掉。诊断时"没有 load 开始"
+            // 本身就说明是稳态。
+            guard message.id != currentMessage?.id else { return }
             // 这一次 `load` 会自动取消上一次载入 —— 所以快速切邮件时
             // 右边是"直接跳到最后一封"，不会把中间每一封都加载完。
             await load(messageID: message.id, manual: false)

@@ -124,8 +124,10 @@ log:
 	@echo "跟随 $(LOG)   (Ctrl-C 退出)"
 	@tail -n 200 -f "$(LOG)"
 
+# --level debug 是必须的：跟随路径上那些"每拍都可能出现"的追踪特意放在
+# debug 级，平时的 stream 不该被它们刷屏，但排障时要能看到。
 stream:
-	log stream --style compact --predicate 'subsystem == "com.zhuyuhao.Mailingo"'
+	log stream --style compact --level debug --predicate 'subsystem == "com.zhuyuhao.Mailingo"'
 
 # 地面真相：不依赖文件写入，直接问系统「appex 到底有没有被 Mail 拉起」。
 # 在**你自己的终端**里跑（本仓库的 agent 沙盒里 log show / pluginkit 都会被拒）。
