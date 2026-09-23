@@ -13,6 +13,35 @@ struct EmailInspectionView: View {
 
     @State private var isImporting = false
     @AppStorage("inspector.showSegments") private var isSegmentsVisible = true
+    @AppStorage("inspector.displayMode") private var displayMode: DisplayMode = .bilingual
+
+    /// 看什么：只看原文 / 只看译文 / 双语并排。
+    ///
+    /// 单独看某一侧在窄窗口（并排放在半屏时）里特别有用 ——
+    /// 两个窗格各占一半会把邮件挤得很窄。
+    enum DisplayMode: String, CaseIterable, Identifiable {
+        case original
+        case translated
+        case bilingual
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .original: "原文"
+            case .translated: "译文"
+            case .bilingual: "双语"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .original: "doc.plaintext"
+            case .translated: "character.book.closed"
+            case .bilingual: "rectangle.split.2x1"
+            }
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -176,6 +205,8 @@ struct EmailInspectionView: View {
         VStack(spacing: 0) {
             summaryBar(inspection)
             Divider()
+            displayModeBar
+            Divider()
 
             // VSplitView：中间那条分隔线可以**上下拖拽**，用来调整
             // 「原文 / 译文」预览区的高度 —— 长邮件里这是最需要能调的一块。
@@ -197,23 +228,77 @@ struct EmailInspectionView: View {
         }
     }
 
-    /// 左右并排的原文 / 译文。两者之间的分隔线可拖拽调整**宽度**。
-    private func previews(_ inspection: EmailInspection) -> some View {
-        HSplitView {
-            PreviewPane(
-                title: "原文",
-                subtitle: "\(inspection.originalHTML.count) 字符",
-                html: inspection.originalHTML,
-                accent: .secondary
-            )
-            PreviewPane(
-                title: model.engineChoice.isRealTranslation ? "中文译文" : "切片后",
-                subtitle: "\(inspection.segments.count) 段",
-                html: inspection.splicedHTML,
-                accent: inspection.fidelity.nonTextBytesIdentical ? .green : .red
-            )
+    /// 显示模式切换条。
+    ///
+    /// 放在预览区正上方而不是挤进工具栏：工具栏已经够满了，
+    /// 而这个开关只影响下面这块内容，挨着放更好找。
+    private var displayModeBar: some View {
+        HStack(spacing: 10) {
+            Picker("显示", selection: $displayMode) {
+                ForEach(DisplayMode.allCases) { mode in
+                    Label(mode.label, systemImage: mode.symbol).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+
+            Text(displayModeHint)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
         }
-        .padding(12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    private var displayModeHint: String {
+        switch displayMode {
+        case .original: "只显示原邮件"
+        case .translated: "只显示译文，适合窗口较窄时阅读"
+        case .bilingual: "左右并排对照，中间分隔线可拖拽调宽度"
+        }
+    }
+
+    /// 按显示模式渲染。双语模式下两者之间的分隔线可拖拽调整**宽度**。
+    @ViewBuilder
+    private func previews(_ inspection: EmailInspection) -> some View {
+        switch displayMode {
+        case .original:
+            originalPane(inspection)
+                .padding(12)
+
+        case .translated:
+            translatedPane(inspection)
+                .padding(12)
+
+        case .bilingual:
+            HSplitView {
+                originalPane(inspection)
+                translatedPane(inspection)
+            }
+            .padding(12)
+        }
+    }
+
+    private func originalPane(_ inspection: EmailInspection) -> some View {
+        PreviewPane(
+            title: "原文",
+            subtitle: "\(inspection.originalHTML.count) 字符",
+            html: inspection.originalHTML,
+            accent: .secondary
+        )
+    }
+
+    private func translatedPane(_ inspection: EmailInspection) -> some View {
+        PreviewPane(
+            title: model.engineChoice.isRealTranslation ? "中文译文" : "切片后",
+            subtitle: "\(inspection.segments.count) 段",
+            html: inspection.splicedHTML,
+            accent: inspection.fidelity.nonTextBytesIdentical ? .green : .red
+        )
     }
 
     private func summaryBar(_ inspection: EmailInspection) -> some View {
