@@ -82,11 +82,11 @@ struct SettingsView: View {
 
     private var mailLinkageSection: some View {
         Section {
-            Toggle("跟随 Mail 一起进退", isOn: $followsMailActivation)
-            Text("Mail 到前台 → 我们的窗口提到最前；Mail 退到后台 → 我们的窗口收起来。\n"
+            Toggle("跟随 Mail 一起显示 / 隐藏", isOn: $followsMailActivation)
+            Text("Mail 被隐藏（右键 Dock 图标 → 隐藏，或 ⌘H）→ 我们也隐藏；"
+                 + "Mail 重新显示 → 我们也显示并提到最前。\n"
                  + "提窗时**不抢键盘焦点**，Mail 仍是活动 App，照常能打字滚动。\n"
-                 + "⚠️ 系统全屏分屏（两个 App 并排占满一屏）下，收起窗口会把分屏拆散 —— "
-                 + "那种情况下两个窗口本来就是同一个空间一起进退，建议关掉这一项。")
+                 + "只跟随「隐藏」，不跟随「切到别的 App」—— 后者会把窗口在你查资料时收走。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
