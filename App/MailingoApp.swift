@@ -93,6 +93,12 @@ struct RootView: View {
             .onReceive(NotificationCenter.default.publisher(for: .mailingoCloseMainWindow)) { _ in
                 dismissWindow(id: "main")
             }
+            // 点 Mail 里的「翻译」→ 按需把窗口贴到屏幕右半边
+            .onReceive(NotificationCenter.default.publisher(for: .mailingoPlaceWindowOnRightHalf)) { _ in
+                if let window = MailActivationFollower.shared.mainWindow {
+                    WindowTiler.placeOnRightHalfIfEnabled(window)
+                }
+            }
             .onReceive(pollTimer) { _ in
                 model.pollPendingRequest()
                 model.pollMailSelection()

@@ -465,6 +465,11 @@ final class InspectorModel: ObservableObject {
         // 别再去 load 最近一封"。
         launchedMessageID = id
         markCurrentRequestHandled()
+
+        // 「点翻译时把窗口贴到右半边」—— 这就是那个时刻。
+        // 窗口归 SwiftUI 管，模型这边只能发通知让它去摆。
+        NotificationCenter.default.post(name: .mailingoPlaceWindowOnRightHalf, object: nil)
+
         Task { await load(messageID: id) }
     }
 
