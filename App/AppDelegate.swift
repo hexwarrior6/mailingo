@@ -8,9 +8,6 @@ extension Notification.Name {
     /// 所以 AppDelegate 只能发个通知，让 SwiftUI 那边用 `openWindow` 去开。
     static let mailingoReopenMainWindow = Notification.Name("com.zhuyuhao.Mailingo.reopenMainWindow")
 
-    /// 「把主窗口贴到屏幕右半边」。用户点了 Mail 里的「翻译」横幅时发。
-    static let mailingoPlaceWindowOnRightHalf = Notification.Name("com.zhuyuhao.Mailingo.placeWindowOnRightHalf")
-
     /// 「把主窗口收掉」。用户开了「Mail 关掉阅读窗口时同时关闭 Mailingo」，
     /// 而 Mail 那边的阅读窗口确实不见了。
     ///

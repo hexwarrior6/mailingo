@@ -21,7 +21,6 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            windowSection
             mailLinkageSection
 
             Section {
@@ -80,25 +79,6 @@ struct SettingsView: View {
     /// **依赖「跟随 Mail」**，没开跟随就没有信号，只能置灰。
     @AppStorage(MailActivationFollower.enabledKey)
     private var followsMailActivation = false
-
-    @AppStorage(WindowTiler.enabledKey)
-    private var tilesWindowRightHalf = false
-
-    /// 窗口摆放。
-    private var windowSection: some View {
-        Section {
-            Toggle("点「翻译」时，把窗口贴到屏幕右半边", isOn: $tilesWindowRightHalf)
-            Text("Mail 全屏时，靠 canJoinAllApplications 让我们的窗口进入它的全屏空间；"
-                 + "否则会被留在桌面空间里，看不到并排。\n"
-                 + "⚠️ Mail 仍占满整个屏幕、**不会被重排**，我们只是盖在它右半边 —— "
-                 + "它的正文栏会被遮住。Apple 没有公开 API 能命令系统做真分屏。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        } header: {
-            Text("窗口")
-        }
-    }
 
     private var mailLinkageSection: some View {
         Section {

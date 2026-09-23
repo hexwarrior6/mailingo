@@ -93,12 +93,6 @@ struct RootView: View {
             .onReceive(NotificationCenter.default.publisher(for: .mailingoCloseMainWindow)) { _ in
                 dismissWindow(id: "main")
             }
-            // 点 Mail 里的「翻译」→ 按需把窗口贴到屏幕右半边。
-            // 注意这里**不直接摆** —— 窗口可能还没被 SwiftUI 摆好，
-            // 摆了也会被随后的初次布局覆盖。交给 WindowTiler 记成待办。
-            .onReceive(NotificationCenter.default.publisher(for: .mailingoPlaceWindowOnRightHalf)) { _ in
-                WindowTiler.requestRightHalf()
-            }
             .onReceive(pollTimer) { _ in
                 model.pollPendingRequest()
                 model.pollMailSelection()
