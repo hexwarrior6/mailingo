@@ -1,26 +1,25 @@
 import AppKit
 import MailKit
 
-/// S0 探针的 UI。
+/// 点击横幅/头部图标后 Mail 呈现的视图。
 ///
-/// 它的唯一使命是**证明 Mail 真的把我们的视图控制器呈现出来了**，
-/// 并且顺手把扩展进程看到的数据展示出来（原始 MIME 长度 + 日志尾部）。
-///
-/// 这不是产品 UI —— 产品侧栏是自绘的 NSPanel（见 docs/IMPLEMENTATION_PLAN.md §4.7）。
+/// 它不是产品 UI（产品侧栏是自绘的 NSPanel），而是**确认"点对了哪一封"**的凭据：
+/// 显示出邮件主题、发件人、时间和 ID。会话里来回好几封时，
+/// 这是最直接的验证方式 —— 点的是哪一封，这里就该显示哪一封。
 final class ProbeViewController: MEExtensionViewController {
 
     enum Reason: String {
         case headerIcon = "邮件头部扩展图标"
-        case messageContext = "横幅 / 头部图标（messageContext）"
+        case messageContext = "横幅（带 messageContext）"
         case bannerAction = "横幅主操作按钮"
     }
 
     private let reason: Reason
-    private let context: Data
+    private let message: StoredMessage?
 
-    init(reason: Reason, context: Data) {
+    init(reason: Reason, message: StoredMessage?) {
         self.reason = reason
-        self.context = context
+        self.message = message
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -30,98 +29,73 @@ final class ProbeViewController: MEExtensionViewController {
     }
 
     override func loadView() {
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 620, height: 460))
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 320))
 
-        let title = NSTextField(labelWithString: "✅ S0 探针成功：Mail 呈现了我们的视图控制器")
+        let title = NSTextField(labelWithString: "Mailingo")
         title.font = .systemFont(ofSize: 15, weight: .semibold)
 
-        let subtitle = NSTextField(wrappingLabelWithString:
-            "触发方式：\(reason.rawValue)\ncontext：\(String(data: context, encoding: .utf8) ?? "<非 UTF-8>")"
-        )
+        let subtitle = NSTextField(wrappingLabelWithString: "触发方式：\(reason.rawValue)")
         subtitle.font = .systemFont(ofSize: 12)
         subtitle.textColor = .secondaryLabelColor
 
-        let body = NSTextView()
-        body.isEditable = false
-        body.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        body.string = Self.buildReport()
+        let body = NSTextField(wrappingLabelWithString: Self.report(for: message))
+        body.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        body.isSelectable = true
 
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.borderType = .bezelBorder
-        scroll.documentView = body
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-
-        let copyButton = NSButton(
-            title: "复制报告",
+        let openButton = NSButton(
+            title: "在 Mailingo 里打开",
             target: self,
-            action: #selector(copyReport)
+            action: #selector(openInApp)
         )
+        openButton.bezelStyle = .rounded
+        openButton.isEnabled = message != nil
 
-        let stack = NSStackView(views: [title, subtitle])
+        let stack = NSStackView(views: [title, subtitle, body, openButton])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 6
+        stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         root.addSubview(stack)
-        root.addSubview(scroll)
-        root.addSubview(copyButton)
-        copyButton.translatesAutoresizingMaskIntoConstraints = false
-
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 18),
-            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
-            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
-
-            scroll.topAnchor.constraint(equalTo: stack.bottomAnchor, constant: 12),
-            scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
-            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
-            scroll.bottomAnchor.constraint(equalTo: copyButton.topAnchor, constant: -10),
-
-            copyButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
-            copyButton.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 20),
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20)
         ])
 
         self.view = root
     }
 
-    @objc private func copyReport() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(Self.buildReport(), forType: .string)
+    @objc private func openInApp() {
+        guard let id = message?.id,
+              let url = URL(string: "mailingo://translate?id=\(id)") else { return }
+        NSWorkspace.shared.open(url)
     }
 
-    private static func buildReport() -> String {
-        var out = ""
+    private static func report(for message: StoredMessage?) -> String {
+        guard let message else {
+            return """
+            没能确定是哪一封邮件。
 
-        out += "── 原始 MIME ──────────────────────────────\n"
-        if let data = try? Data(contentsOf: ProbeLog.lastMessageURL) {
-            out += "已落盘 \(data.count) bytes → \(ProbeLog.lastMessageURL.path)\n"
-            out += "看上去是完整邮件？\(looksLikeFullMessage(data) ? "是（含头部 + 正文分隔）" : "⚠️ 否")\n\n"
-            out += "前 1200 字节预览：\n"
-            let preview = data.prefix(1200)
-            out += String(data: preview, encoding: .utf8)
-                ?? String(data: preview, encoding: .isoLatin1)
-                ?? "<无法解码>"
-            out += "\n"
-        } else {
-            out += "⚠️ 没有找到 \(ProbeLog.lastMessageURL.path)\n"
-            out += "说明 decodedMessage(forMessageData:) 还没被调用过。\n"
+            这条路径（头部图标）拿不到 Mail 回传的 context，
+            而仓库里目前还没有任何已捕获的邮件。
+
+            请改用邮件顶部的「翻译」横幅 —— 那条路径能精确知道点的是哪一封。
+            """
         }
 
-        out += "\n── 事件日志（尾部 6000 字符）────────────────\n"
-        let log = ProbeLog.shared.readLog()
-        out += log.count > 6000 ? String(log.suffix(6000)) : log
-        out += "\n"
-        return out
-    }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
 
-    /// 粗判是否是一封完整的 MIME 邮件：有头部区、且存在头部/正文分隔空行。
-    private static func looksLikeFullMessage(_ data: Data) -> Bool {
-        guard data.count > 64 else { return false }
-        let head = data.prefix(16384)
-        guard let text = String(data: head, encoding: .utf8)
-            ?? String(data: head, encoding: .isoLatin1) else { return false }
-        return text.contains("\n\n") || text.contains("\r\n\r\n")
+        return """
+        邮件 ID : \(message.id)
+        主题    : \(message.subject.isEmpty ? "(无主题)" : message.subject)
+        发件人  : \(message.from.isEmpty ? "(未知)" : message.from)
+        时间    : \(message.date.map(formatter.string(from:)) ?? "(未知)")
+        大小    : \(message.byteCount) 字节
+
+        已同步到 Mailingo，翻译结果会显示在其窗口中。
+        """
     }
 }

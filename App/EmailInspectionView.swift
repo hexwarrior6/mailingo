@@ -7,15 +7,11 @@ import UniformTypeIdentifiers
 ///
 /// 左边是原文渲染，右边是切片后的渲染。切到「Apple 翻译」时右边就是**真中文**；
 /// 切到「标记替换」时每个文本节点变成 `〖N〗`，用来看清哪些节点被碰过。
-/// 两边一对比就能确认方案 §6 的要求：表格、图片、颜色、条件注释都还在，
-/// 只有文字被换掉了。
 struct EmailInspectionView: View {
 
-    @StateObject private var model = InspectorModel()
+    @ObservedObject var model: InspectorModel
+
     @State private var isImporting = false
-    @State private var didRunStartupDiagnostics = false
-    /// 底部片段面板是否展开。持久化 —— 用户折叠一次就是不想看它，
-    /// 下次启动不该又弹回来。
     @AppStorage("inspector.showSegments") private var isSegmentsVisible = true
 
     var body: some View {
@@ -26,7 +22,7 @@ struct EmailInspectionView: View {
 
             switch model.state {
             case .idle:
-                placeholder("点「载入最近邮件」开始。")
+                placeholder("点「刷新」或从左上角选择一封邮件开始。")
             case .loading:
                 placeholder("解析中…")
             case .failed(let message):
@@ -37,16 +33,6 @@ struct EmailInspectionView: View {
                 } else {
                     placeholder("解析完成，但没有内容。")
                 }
-            }
-        }
-        .onAppear {
-            guard !didRunStartupDiagnostics else { return }
-            didRunStartupDiagnostics = true
-            Task {
-                await model.loadFromProbeLog()
-                // 启动时自检一次，但**不触发系统下载弹窗** ——
-                // 只是把「语言包装了没」这类事实记下来，用户没要求就别打扰他。
-                await model.runDiagnostics(allowDownloadTrigger: false)
             }
         }
         .fileImporter(
@@ -64,11 +50,15 @@ struct EmailInspectionView: View {
 
     private var toolbar: some View {
         HStack(spacing: 10) {
-            Text("邮件解析").font(.headline)
+            messagePicker
 
-            Button("载入最近邮件") {
-                Task { await model.loadFromProbeLog() }
+            Button {
+                Task { await model.loadMostRecent() }
+            } label: {
+                Image(systemName: "arrow.clockwise")
             }
+            .help("重新读取已捕获的邮件列表")
+
             Button("打开 .eml…") { isImporting = true }
 
             Divider().frame(height: 16)
@@ -79,7 +69,8 @@ struct EmailInspectionView: View {
                 }
             }
             .pickerStyle(.segmented)
-            .frame(width: 280)
+            .labelsHidden()
+            .frame(width: 260)
 
             Button("翻译自检") {
                 Task { await model.runDiagnostics(allowDownloadTrigger: true) }
@@ -89,6 +80,46 @@ struct EmailInspectionView: View {
             Spacer()
         }
         .padding(12)
+    }
+
+    /// 会话（来回好几封回复）里从这里选具体是哪一封。
+    private var messagePicker: some View {
+        Menu {
+            if model.capturedMessages.isEmpty {
+                Text("还没有捕获到邮件")
+            } else {
+                ForEach(model.capturedMessages) { message in
+                    Button {
+                        Task { await model.load(messageID: message.id) }
+                    } label: {
+                        Text("\(message.displayTitle) — \(shortSender(message.from))")
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "envelope")
+                Text(model.currentMessage?.displayTitle ?? "选择邮件")
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if model.capturedMessages.count > 1 {
+                    Text("(\(model.capturedMessages.count))")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: 320, alignment: .leading)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize(horizontal: false, vertical: true)
+        .help("已捕获的邮件。会话里来回好几封都会列在这里。")
+    }
+
+    private func shortSender(_ from: String) -> String {
+        // "Name <a@b.c>" → "Name"；只有地址就原样返回
+        if let angle = from.firstIndex(of: "<") {
+            return from[from.startIndex..<angle].trimmingCharacters(in: .whitespaces)
+        }
+        return from
     }
 
     // MARK: - 翻译状态
@@ -102,8 +133,7 @@ struct EmailInspectionView: View {
         case .running(let done, let total):
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("翻译中 \(done)/\(total)")
-                    .font(.caption)
+                Text("翻译中 \(done)/\(total)").font(.caption)
                 Spacer()
             }
             .padding(.horizontal, 12)
@@ -113,9 +143,7 @@ struct EmailInspectionView: View {
         case .failed(let message):
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                Text(message)
-                    .font(.caption)
-                    .textSelection(.enabled)
+                Text(message).font(.caption).textSelection(.enabled)
                 Spacer()
             }
             .padding(.horizontal, 12)
@@ -146,8 +174,7 @@ struct EmailInspectionView: View {
             }
 
             Divider()
-            // 折叠条固定在窗口底部：无论展开还是折叠都停在同一位置，
-            // 位置稳定，不会因为展开/收起而跳来跳去。
+            // 折叠条固定在窗口底部：展开还是折叠都停在同一位置，不会跳。
             segmentsToggleBar(count: inspection.segments.count)
         }
     }
@@ -189,9 +216,15 @@ struct EmailInspectionView: View {
                     chip("纯文本回退", color: .orange)
                 }
                 Spacer()
-                if let url = model.sourceURL {
-                    Text(url.lastPathComponent).font(.caption).foregroundStyle(.tertiary)
-                }
+            }
+
+            if let message = model.currentMessage {
+                Text("\(message.displayTitle)　·　\(message.from)　·　id \(message.id)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
             }
 
             Text(inspection.fidelity.detail)

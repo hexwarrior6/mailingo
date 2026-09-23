@@ -106,6 +106,12 @@ targets:
         LSMinimumSystemVersion: "15.0"
         LSApplicationCategoryType: public.app-category.productivity
         NSHumanReadableCopyright: "Mailingo"
+        # Mail 扩展点击横幅后用它唤醒容器 App（appex 是沙盒进程，
+        # 只能通过 LaunchServices 打开已注册的 URL scheme 来拉起别的 App）
+        CFBundleURLTypes:
+          - CFBundleURLName: com.zhuyuhao.Mailingo
+            CFBundleURLSchemes:
+              - mailingo
     dependencies:
       - target: MailingoMailExtension
         embed: true
@@ -127,6 +133,10 @@ targets:
     sources:
       - path: MailExtension
       - path: Shared
+    dependencies:
+      # 用统一的 MIMEHeaders（头部解析那份实现踩过 CRLF 与大小写两个坑，
+      # 只留一处才不会又踩第二次）
+      - target: EmailCore
     info:
       path: Support/MailingoMailExtension-Info.plist
       properties:

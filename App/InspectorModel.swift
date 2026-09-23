@@ -40,7 +40,6 @@ final class InspectorModel: ObservableObject {
         case loaded
     }
 
-    /// 翻译进度。真实翻译是异步且有耗时的，UI 必须能看到"翻到哪了"。
     enum TranslationStatus: Equatable {
         case idle
         case running(done: Int, total: Int)
@@ -51,6 +50,11 @@ final class InspectorModel: ObservableObject {
     @Published private(set) var inspection: EmailInspection?
     @Published private(set) var translationStatus: TranslationStatus = .idle
 
+    /// 已捕获的邮件（会话里来回好几封都会在这里，最新在前）。
+    @Published private(set) var capturedMessages: [StoredMessage] = []
+    /// 当前正在看的是哪一封。
+    @Published private(set) var currentMessage: StoredMessage?
+
     @Published var engineChoice: EngineChoice = .apple {
         didSet {
             guard oldValue != engineChoice else { return }
@@ -58,7 +62,6 @@ final class InspectorModel: ObservableObject {
         }
     }
 
-    private(set) var sourceURL: URL?
     private(set) var sourceBytes: Int = 0
 
     private var analysis: EmailAnalysis?
@@ -67,36 +70,115 @@ final class InspectorModel: ObservableObject {
     /// 所以结果回来时要确认"我还是当前那一次"，否则旧邮件的译文会覆盖新邮件。
     private var runToken = UUID()
 
+    /// 上一次处理过的请求 nonce，用来判断有没有新请求。
+    private var lastHandledRequestNonce: String?
+    /// messages 目录的上次修改时间，避免每次轮询都全量重读元数据。
+    private var lastMessagesDirectoryStamp: Date?
+
+    // MARK: - 启动
+
+    func bootstrap() async {
+        refreshCapturedMessages(force: true)
+        await loadMostRecent()
+        // 启动时自检一次，但**不触发系统下载弹窗** ——
+        // 只是把「语言包装了没」这类事实记下来，用户没要求就别打扰他。
+        await runDiagnostics(allowDownloadTrigger: false)
+    }
+
     // MARK: - 载入
 
-    /// 从 appex 的沙盒容器里读最近一封真实邮件。
-    func loadFromProbeLog() async {
-        let url = ProbeLog.lastMessageURL
-        guard FileManager.default.fileExists(atPath: url.path) else {
+    /// 载入最近捕获的那封。
+    func loadMostRecent() async {
+        refreshCapturedMessages(force: true)
+        if let newest = capturedMessages.first {
+            await load(messageID: newest.id)
+        } else {
             state = .failed("""
-            还没拿到邮件。
+            还没有捕获到任何邮件。
 
-            请确认 Mail 里的 Mailingo 扩展已启用，并打开几封邮件 —— appex 会把最近一封的\
-            原始 MIME 写到这里：
-            \(url.path)
+            请在 Mail 里打开一封邮件，点邮件顶部的「翻译」横幅 ——
+            Mail 会把那封邮件交给 Mailingo 的扩展，扩展存好之后这里就能看到。
             """)
+        }
+    }
+
+    /// 载入指定 ID 的邮件。
+    func load(messageID: String) async {
+        let stored = capturedMessages.first { $0.id == messageID }
+            ?? MessageStore.all().first { $0.id == messageID }
+
+        guard let stored else {
+            state = .failed("找不到邮件 \(messageID)，可能已经被清理掉了。")
+            return
+        }
+        guard let raw = MessageStore.rawMessage(id: messageID) else {
+            state = .failed("邮件 \(messageID) 的原始内容读不出来。")
             return
         }
 
+        currentMessage = stored
         do {
-            try await analyze(data: Data(contentsOf: url), sourceURL: url)
+            try await analyze(data: raw)
+        } catch {
+            state = .failed("解析失败：\(error.localizedDescription)")
+        }
+    }
+
+    /// 用户从「打开 .eml…」选的文件。
+    func load(fileURL: URL) async {
+        currentMessage = nil
+        do {
+            try await analyze(data: Data(contentsOf: fileURL))
         } catch {
             state = .failed("读取失败：\(error.localizedDescription)")
         }
     }
 
-    /// 从用户选的文件读（用于喂自造的 fixture 或邮件样本）。
-    func load(fileURL: URL) async {
-        do {
-            try await analyze(data: Data(contentsOf: fileURL), sourceURL: fileURL)
-        } catch {
-            state = .failed("读取失败：\(error.localizedDescription)")
+    // MARK: - 从 Mail 来的请求
+
+    /// 处理 `mailingo://translate?id=xxx`。
+    func handle(url: URL) {
+        guard url.scheme == "mailingo",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let id = components.queryItems?.first(where: { $0.name == "id" })?.value,
+              !id.isEmpty else { return }
+
+        // 立刻记下 nonce，避免随后的轮询把同一个请求再处理一遍
+        markCurrentRequestHandled()
+        Task { await load(messageID: id) }
+    }
+
+    /// 轮询待处理请求。
+    ///
+    /// 为什么除了 URL scheme 还要轮询：容器 App 可能**已经在运行**，这时
+    /// LaunchServices 打开 URL 未必能把请求送进来；而且 appex 是沙盒进程，
+    /// 打开 URL 有失败的可能。轮询一个请求文件是兜底，代价只有一次读文件。
+    func pollPendingRequest() {
+        refreshCapturedMessages()
+
+        guard let request = MessageStore.readPendingRequest(),
+              request.nonce != lastHandledRequestNonce else { return }
+
+        lastHandledRequestNonce = request.nonce
+        Task { await load(messageID: request.messageID) }
+    }
+
+    private func markCurrentRequestHandled() {
+        lastHandledRequestNonce = MessageStore.readPendingRequest()?.nonce
+    }
+
+    // MARK: - 已捕获列表
+
+    func refreshCapturedMessages(force: Bool = false) {
+        let directory = SharedPaths.messages
+        let attributes = try? FileManager.default.attributesOfItem(atPath: directory.path)
+        let stamp = attributes?[.modificationDate] as? Date
+
+        if !force, let stamp, stamp == lastMessagesDirectoryStamp {
+            return
         }
+        lastMessagesDirectoryStamp = stamp
+        capturedMessages = MessageStore.all()
     }
 
     // MARK: - 翻译
@@ -117,7 +199,6 @@ final class InspectorModel: ObservableObject {
         runToken = token
         let segments = analysis.segments
 
-        // 没有片段就别折腾引擎了，直接给一个原样的结果
         guard !segments.isEmpty else {
             guard runToken == token else { return }
             inspection = EmailInspector.apply(translations: [:], to: analysis)
@@ -126,10 +207,6 @@ final class InspectorModel: ObservableObject {
         }
 
         translationStatus = .running(done: 0, total: segments.count)
-
-        // 先立刻用"原文"把结果渲染出来，然后随着译文到达逐步替换 ——
-        // 用户马上看得到排版，而不是对着空窗格等。
-        var translations: [Int: String] = [:]
 
         do {
             let translated = try await engine.translate(
@@ -143,19 +220,18 @@ final class InspectorModel: ObservableObject {
                 }
             )
 
-            translations = Dictionary(uniqueKeysWithValues: translated.map { ($0.id, $0.targetText) })
             try Task.checkCancellation()
-
-            // 旧运行的结果不许覆盖新邮件
             guard runToken == token else { return }
+
+            let translations = Dictionary(uniqueKeysWithValues: translated.map { ($0.id, $0.targetText) })
             inspection = EmailInspector.apply(translations: translations, to: analysis)
             translationStatus = .idle
         } catch is CancellationError {
             // 用户切了引擎或换了邮件，静默丢弃
         } catch {
+            guard runToken == token else { return }
             // 失败时仍然把原文渲染出来，并把原因讲清楚 ——
             // 总比一个空窗格好，用户至少能看到邮件内容。
-            guard runToken == token else { return }
             inspection = EmailInspector.apply(translations: [:], to: analysis)
             translationStatus = .failed(Self.describe(error))
         }
@@ -163,7 +239,6 @@ final class InspectorModel: ObservableObject {
 
     // MARK: - 自检
 
-    /// 跑一遍翻译链路自检并落盘，便于不开 UI 也能确认引擎是否真的通了。
     @discardableResult
     func runDiagnostics(allowDownloadTrigger: Bool) async -> TranslationDiagnostics.Report? {
         guard let analysis, !analysis.segments.isEmpty else { return nil }
@@ -180,16 +255,14 @@ final class InspectorModel: ObservableObject {
 
     // MARK: - 内部
 
-    private func analyze(data: Data, sourceURL: URL?) async throws {
+    private func analyze(data: Data) async throws {
         state = .loading
 
-        // 解析放到后台：营销邮件动辄几百 KB，别卡住 UI
         let analysis = try await Task.detached(priority: .userInitiated) {
             try EmailInspector.analyze(rawMessage: data)
         }.value
 
         self.analysis = analysis
-        self.sourceURL = sourceURL
         self.sourceBytes = data.count
         self.state = .loaded
 
@@ -208,15 +281,11 @@ final class InspectorModel: ObservableObject {
 
 /// 诊断日志落盘。
 ///
-/// 位置刻意和探针日志放一起（`~/Library/Logs/Mailingo/`），
-/// 这样"扩展有没有拿到邮件"和"翻译有没有通"两件事在同一个地方看。
+/// 位置和探针日志放一起，这样"扩展有没有拿到邮件"和"翻译有没有通"
+/// 两件事在同一个地方看。
 enum DiagnosticLog {
 
-    static var directory: URL {
-        FileManager.default
-            .urls(for: .libraryDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Logs/Mailingo", isDirectory: true)
-    }
+    static var directory: URL { SharedPaths.logs }
 
     static var translationURL: URL { directory.appendingPathComponent("translation-selftest.log") }
 

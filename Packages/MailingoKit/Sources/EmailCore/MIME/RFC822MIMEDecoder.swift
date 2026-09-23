@@ -148,42 +148,10 @@ public struct RFC822MIMEDecoder: MIMEDecoding {
         return nil
     }
 
+    /// 头部解析统一走 `MIMEHeaders` —— 那份实现踩过 CRLF 与大小写两个坑，
+    /// 只保留一处才不会又踩第二次。
     private static func parseHeaders(_ bytes: [UInt8]) -> [String: String] {
-        // 头部是 ASCII 的超集，isoLatin1 保证逐字节不丢
-        guard let text = String(bytes: bytes, encoding: .isoLatin1) else { return [:] }
-
-        var headers: [String: String] = [:]
-        var currentName: String?
-        var currentValue = ""
-
-        func flush() {
-            if let name = currentName {
-                headers[name] = currentValue.trimmingCharacters(in: .whitespaces)
-            }
-            currentName = nil
-            currentValue = ""
-        }
-
-        for rawLine in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            // 折行续行：以空白开头，接到上一个头部
-            if let first = rawLine.first, first == " " || first == "\t" {
-                currentValue += " " + line
-                continue
-            }
-
-            flush()
-
-            guard let colon = line.firstIndex(of: ":") else { continue }
-            let name = String(line[line.startIndex..<colon]).trimmingCharacters(in: .whitespaces).lowercased()
-            guard !name.isEmpty else { continue }
-            currentName = name
-            currentValue = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
-        }
-        flush()
-
-        return headers
+        MIMEHeaders.parse(bytes: bytes)
     }
 
     // MARK: - 分隔 boundary
@@ -318,23 +286,6 @@ public struct RFC822MIMEDecoder: MIMEDecoding {
     // MARK: - 字符集
 
     static func decodeText(_ bytes: [UInt8], charset: String?) -> String {
-        let name = (charset ?? "").trimmingCharacters(in: .whitespaces).lowercased()
-        let data = Data(bytes)
-
-        // 1) 按声明的 charset 解
-        if !name.isEmpty,
-           let cfEncoding = CFStringConvertIANACharSetNameToEncoding(name as CFString) as CFStringEncoding?,
-           cfEncoding != kCFStringEncodingInvalidId {
-            let nsEncoding = CFStringConvertEncodingToNSStringEncoding(cfEncoding)
-            if let text = String(data: data, encoding: String.Encoding(rawValue: nsEncoding)) {
-                return text
-            }
-        }
-
-        // 2) 回退 UTF-8
-        if let text = String(data: data, encoding: .utf8) { return text }
-
-        // 3) 最后兜底：isoLatin1 永不失败（逐字节映射）
-        return String(data: data, encoding: .isoLatin1) ?? ""
+        MIMEHeaders.decodeText(Data(bytes), charset: charset ?? "") ?? ""
     }
 }

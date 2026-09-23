@@ -19,44 +19,11 @@ public final class ProbeLog: @unchecked Sendable {
 
     public static let shared = ProbeLog()
 
-    /// appex 的 bundle id，决定它的沙盒容器目录名。
-    public static let extensionBundleID = "com.zhuyuhao.Mailingo.MailExtension"
-
-    /// 真实 home。沙盒进程的 `homeDirectoryForCurrentUser` 会返回容器路径，
-    /// 所以这里走 passwd 直接拿 `/Users/xxx`，保证两个进程算出同一个结果。
-    private static var realHome: URL {
-        if let pw = getpwuid(getuid()) {
-            return URL(fileURLWithPath: String(cString: pw.pointee.pw_dir))
-        }
-        return FileManager.default.homeDirectoryForCurrentUser
-    }
-
-    /// appex 的沙盒容器内的探针目录（绝对路径）。
-    public static var containerDirectory: URL {
-        realHome
-            .appendingPathComponent("Library/Containers", isDirectory: true)
-            .appendingPathComponent(extensionBundleID, isDirectory: true)
-            .appendingPathComponent("Data/Library/Logs/Mailingo", isDirectory: true)
-    }
-
-    /// 探针数据目录。两个进程用不同写法但指向同一处：
-    ///
-    /// - **沙盒进程（appex）**：用系统的 `.libraryDirectory`，由沙盒自动重定向进容器。
-    ///   这是最稳的写法 —— 不依赖我们把容器路径拼对，也不依赖沙盒允许写"字面容器路径"。
-    /// - **非沙盒进程（容器 App）**：用绝对容器路径，去读写 appex 写下的数据。
-    public static var directory: URL {
-        if ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil {
-            return FileManager.default
-                .urls(for: .libraryDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("Logs/Mailingo", isDirectory: true)
-        }
-        return containerDirectory
-    }
+    /// 共享路径集中在 `SharedPaths` 里（appex 沙盒容器 → 容器 App 可直读）。
+    public static var directory: URL { SharedPaths.logs }
 
     /// 早先非沙盒版本留下的位置，读取时作为兜底。
-    public static var legacyDirectory: URL {
-        realHome.appendingPathComponent("Library/Logs/Mailingo", isDirectory: true)
-    }
+    public static var legacyDirectory: URL { SharedPaths.legacyLogs }
 
     public static var logURL: URL { directory.appendingPathComponent("probe.log") }
     public static var lastMessageURL: URL { directory.appendingPathComponent("last-message.eml") }

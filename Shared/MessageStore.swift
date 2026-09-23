@@ -1,0 +1,198 @@
+import CryptoKit
+import EmailCore
+import Foundation
+
+/// 一封被捕获下来的邮件（不含正文，只有元数据）。
+public struct StoredMessage: Codable, Identifiable, Sendable, Hashable {
+    /// 由**原始 MIME 内容**算出的稳定 ID。
+    public var id: String
+    public var subject: String
+    public var from: String
+    /// `Date:` 头部解析出来的时间（可能缺失）。
+    public var date: Date?
+    /// `Message-ID:` 头部，用于展示与去重。
+    public var internetMessageID: String?
+    public var byteCount: Int
+    /// 我们捕获到它的时刻。
+    public var capturedAt: Date
+
+    /// 列表里显示的标题。主题为空时退化成发件人。
+    public var displayTitle: String {
+        subject.isEmpty ? (from.isEmpty ? "(无主题)" : from) : subject
+    }
+}
+
+/// 用户在 Mail 里点了某封邮件的「翻译」按钮。
+public struct PendingTranslationRequest: Codable, Sendable, Equatable {
+    public var messageID: String
+    public var requestedAt: Date
+    /// 每次请求换一个，避免"同一封信连点两次"被误判成没变化。
+    public var nonce: String
+}
+
+/// 捕获邮件的仓库。
+///
+/// ## 为什么要按 ID 分开存
+///
+/// 早先所有邮件都写进同一个 `last-message.eml`，**后一封直接覆盖前一封**。
+/// 在会话（来回好几封回复）里这是致命的：Mail 会把线程里每一封都解码一遍，
+/// 于是容器 App 拿到的是"最后被解码的那封"，跟用户正在看哪一封**毫无关系**。
+/// 实测 200 次调用出现了十几个不同大小 —— 说明确实在多封之间反复覆盖。
+///
+/// 现在每封邮件一个文件（`messages/<id>.eml` + `<id>.json`），
+/// 再靠 banner 的 `context` 把「用户点的是哪一封」精确传出来。
+///
+/// ## 为什么用"一文件一元数据"而不是一个总索引
+///
+/// appex 与容器 App 是两个进程。共用一份可变的索引文件会引入读写竞态
+/// （appex 正在写、App 正在读）。每封邮件自带元数据、目录即索引，
+/// 就没有共享可变状态了。
+public enum MessageStore {
+
+    /// 最近捕获的邮件数量上限。会话可能很长，但没必要无限留着。
+    public static let maxStoredMessages = 60
+
+    // MARK: - 写入（appex 侧）
+
+    /// 保存一封邮件的原始 MIME，返回它的元数据。
+    ///
+    /// 同一封邮件重复解码（Mail 会这么干）时是幂等的：ID 由内容决定，
+    /// 文件被覆盖成一样的内容，元数据里只更新 `capturedAt`。
+    @discardableResult
+    public static func save(rawMIME: Data) -> StoredMessage {
+        let id = identifier(for: rawMIME)
+        let headers = MIMEHeaders.parse(rawMIME)
+
+        let message = StoredMessage(
+            id: id,
+            subject: MIMEHeaders.decodeRFC2047(MIMEHeaders.value("subject", in: headers) ?? ""),
+            from: MIMEHeaders.decodeRFC2047(MIMEHeaders.value("from", in: headers) ?? ""),
+            date: parseDate(MIMEHeaders.value("date", in: headers)),
+            internetMessageID: MIMEHeaders.value("message-id", in: headers),
+            byteCount: rawMIME.count,
+            capturedAt: Date()
+        )
+
+        let rawURL = SharedPaths.messages.appendingPathComponent("\(id).eml")
+        let metaURL = SharedPaths.messages.appendingPathComponent("\(id).json")
+
+        try? rawMIME.write(to: rawURL, options: .atomic)
+        if let data = try? JSONEncoder.messages.encode(message) {
+            try? data.write(to: metaURL, options: .atomic)
+        }
+
+        pruneIfNeeded()
+        return message
+    }
+
+    /// 由内容算出的稳定 ID。取 SHA-256 前 16 个十六进制字符，够用且短。
+    public static func identifier(for rawMIME: Data) -> String {
+        let digest = SHA256.hash(data: rawMIME)
+        return digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+
+    // MARK: - 读取（容器 App 侧）
+
+    public static func rawMessage(id: String) -> Data? {
+        try? Data(contentsOf: SharedPaths.messages.appendingPathComponent("\(id).eml"))
+    }
+
+    /// 已捕获的邮件，按捕获时间倒序。
+    public static func all() -> [StoredMessage] {
+        let directory = SharedPaths.messages
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else { return [] }
+
+        let decoder = JSONDecoder.messages
+        return entries
+            .filter { $0.pathExtension == "json" }
+            .compactMap { url -> StoredMessage? in
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                return try? decoder.decode(StoredMessage.self, from: data)
+            }
+            .sorted { $0.capturedAt > $1.capturedAt }
+    }
+
+    public static func mostRecent() -> StoredMessage? {
+        all().first
+    }
+
+    // MARK: - 待处理请求
+
+    /// appex 在被点击 banner 时调用：告诉容器 App「用户要翻这一封」。
+    public static func writePendingRequest(messageID: String) {
+        let request = PendingTranslationRequest(
+            messageID: messageID,
+            requestedAt: Date(),
+            nonce: UUID().uuidString
+        )
+        guard let data = try? JSONEncoder.messages.encode(request) else { return }
+        try? data.write(to: SharedPaths.pendingRequest, options: .atomic)
+    }
+
+    public static func readPendingRequest() -> PendingTranslationRequest? {
+        guard let data = try? Data(contentsOf: SharedPaths.pendingRequest) else { return nil }
+        return try? JSONDecoder.messages.decode(PendingTranslationRequest.self, from: data)
+    }
+
+    // MARK: - 私有
+
+    private static func parseDate(_ raw: String?) -> Date? {
+        guard let raw, !raw.isEmpty else { return nil }
+        // RFC 5322 日期，形态很多；两种 formatter 覆盖绝大多数情况
+        for formatter in [DateFormatter.rfc5322, DateFormatter.rfc5322Fallback] {
+            if let date = formatter.date(from: raw) { return date }
+        }
+        return nil
+    }
+
+    /// 超出上限就删掉最旧的（连同 .eml 和 .json）。
+    private static func pruneIfNeeded() {
+        let messages = all()
+        guard messages.count > maxStoredMessages else { return }
+
+        for message in messages[maxStoredMessages...] {
+            for ext in ["eml", "json"] {
+                try? FileManager.default.removeItem(
+                    at: SharedPaths.messages.appendingPathComponent("\(message.id).\(ext)")
+                )
+            }
+        }
+    }
+}
+
+// MARK: - 编解码器
+
+private extension JSONEncoder {
+    static var messages: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }
+}
+
+private extension JSONDecoder {
+    static var messages: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+}
+
+private extension DateFormatter {
+    static var rfc5322: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "EEE, d MMM yyyy HH:mm:ss Z"
+        return formatter
+    }
+
+    static var rfc5322Fallback: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "d MMM yyyy HH:mm:ss Z"
+        return formatter
+    }
+}
