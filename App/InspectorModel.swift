@@ -343,6 +343,7 @@ final class InspectorModel: ObservableObject {
             try await analyze(data: raw, ignoringCache: ignoringCache, token: token)
         } catch is CancellationError {
             // 被取代了，静默丢弃 —— 这不是错误，是预期行为
+            trace.notice("载入被取代 \(messageID, privacy: .public)（已取消，不再落地）")
         } catch {
             guard loadToken == token else { return }
             state = .failed("解析失败：\(error.localizedDescription)")
@@ -398,7 +399,10 @@ final class InspectorModel: ObservableObject {
         // 后果 —— 当查询比轮询间隔还慢时（Mail 忙、或脚本挂着），每一拍都会把
         // 上一拍取消掉，于是**永远拿不到任何结果**，跟随直接失效。
         // 真正需要"取消上一个"的是**载入**，那个在 `load` 里做。
-        guard selectionQueryTask == nil else { return }
+        guard selectionQueryTask == nil else {
+            trace.notice("上一次查询还没回来 → 跳过这一拍（跟随可能因此变慢）")
+            return
+        }
 
         let query = Task { try await MailSelectionMonitor.shared.currentSelection() }
         selectionQueryTask = query
@@ -436,6 +440,7 @@ final class InspectorModel: ObservableObject {
 
             guard !followSuppressed else {
                 mailFollowStatus = .following
+                trace.notice("跟随被抑制（用户手动选过）→ 这次不切")
                 return
             }
 
@@ -448,7 +453,10 @@ final class InspectorModel: ObservableObject {
             }
 
             mailFollowStatus = .following
-            guard message.id != currentMessage?.id else { return }
+            guard message.id != currentMessage?.id else {
+                trace.notice("Mail 选中的就是当前这封 → 不用切")
+                return
+            }
             // 这一次 `load` 会自动取消上一次载入 —— 所以快速切邮件时
             // 右边是"直接跳到最后一封"，不会把中间每一封都加载完。
             await load(messageID: message.id, manual: false)
@@ -673,7 +681,11 @@ final class InspectorModel: ObservableObject {
         guard loadToken == token else { return }
         state = .loading
 
+        let started = Date()
+        trace.notice("解析开始 \(self.currentMessage?.id ?? "?", privacy: .public)（\(data.count / 1024) KB）")
+
         let analysis = try await analyzeOffMainThread(data)
+        trace.notice("解析完成 \(self.currentMessage?.id ?? "?", privacy: .public)  用时 \(Int(Date().timeIntervalSince(started) * 1000)) ms")
 
         // 解析是这段里最耗时的一步（MIME 解码 + HTML 分词）。回来之后必须
         // 重新确认自己还是"当前那一次"，否则旧邮件会盖掉用户已经切过去的新邮件。
