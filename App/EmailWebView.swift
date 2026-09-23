@@ -67,6 +67,8 @@ struct EmailWebView: NSViewRepresentable {
         private var currentHTML = ""
         private var loadedRenderedHTML: String?
         private var appliedRemotePolicy: Bool?
+        /// 拦截规则是否**已经真正挂到 controller 上**（注意：不是"编译好了"）。
+        private var isBlockingInPlace = false
 
         init(inlineResources: [String: InlineResource]) {
             self.inlineResources = inlineResources
@@ -82,7 +84,7 @@ struct EmailWebView: NSViewRepresentable {
 
             if appliedRemotePolicy != allowsRemoteContent {
                 appliedRemotePolicy = allowsRemoteContent
-                applyRemoteContentPolicy(allowsRemoteContent)
+                configureRemoteContentPolicy(allowsRemoteContent)
                 // 策略变化必须重新加载才会对已发出的请求生效
                 loadedRenderedHTML = nil
             }
@@ -94,6 +96,15 @@ struct EmailWebView: NSViewRepresentable {
 
         private func reloadIfNeeded() {
             guard let webView else { return }
+
+            // ★ 要拦截、但规则还没挂上 —— **先别加载**。
+            //
+            // 规则表的编译是异步的。早先这里没等它，于是首次渲染会在
+            // 规则就位之前把 HTML 加载出去：那几毫秒里远程图片的请求**已经发出去了**，
+            // 发件人该知道的已经知道了。"拦截"却没拦住，等于白做。
+            // 宁可多等一个异步回合，也不能先放请求出去。
+            if appliedRemotePolicy == false, !isBlockingInPlace { return }
+
             let rendered = CIDReferenceRewriter.rewrite(currentHTML)
             guard loadedRenderedHTML != rendered else { return }
             loadedRenderedHTML = rendered
@@ -102,7 +113,7 @@ struct EmailWebView: NSViewRepresentable {
 
         // MARK: 远程内容策略
 
-        private func applyRemoteContentPolicy(_ allows: Bool) {
+        private func configureRemoteContentPolicy(_ allows: Bool) {
             guard let webView else { return }
             let controller = webView.configuration.userContentController
 
@@ -110,17 +121,28 @@ struct EmailWebView: NSViewRepresentable {
             if let existing = Self.blockRuleList {
                 controller.remove(existing)
             }
+            isBlockingInPlace = false
+
+            // 放行：摘掉规则就行
             guard !allows else { return }
 
             if let list = Self.blockRuleList {
+                // 已经编译过，直接挂上
                 controller.add(list)
+                isBlockingInPlace = true
             } else {
                 Self.compileBlockRuleList { [weak self] list in
+                    guard let self else { return }
                     Self.blockRuleList = list
-                    guard let list, let self, let webView = self.webView,
+
+                    // 编译期间策略可能又被切走了，要重新确认
+                    guard let list, let webView = self.webView,
                           self.appliedRemotePolicy == false else { return }
+
                     webView.configuration.userContentController.add(list)
+                    self.isBlockingInPlace = true
                     self.loadedRenderedHTML = nil
+                    // 规则就位了，这次才真的加载
                     self.reloadIfNeeded()
                 }
             }
