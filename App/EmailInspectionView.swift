@@ -218,6 +218,7 @@ struct EmailInspectionView: View {
             Divider()
             displayModeBar
             Divider()
+            remoteContentNotice(inspection)
 
             // VSplitView：中间那条分隔线可以**上下拖拽**，用来调整
             // 「原文 / 译文」预览区的高度 —— 长邮件里这是最需要能调的一块。
@@ -268,6 +269,33 @@ struct EmailInspectionView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+
+    /// 外部图片被拦截时的提示条。
+    ///
+    /// 这一条不是装饰，是**必需**的：真实案例里，一封营销邮件把 emoji 做成了远程图片
+    /// （`<img alt="🌍" src="https://…/1f30d.png">`），拦截之后那几个 emoji 凭空消失，
+    /// 而同封邮件里真正的文字 emoji（📅📍）还正常显示 ——
+    /// 用户看到的就是"有些 emoji 显示不出来"，根本猜不到是图片被拦了。
+    ///
+    /// 明说「已拦截 N 张外部图片」并给一键载入，才对得上 Mail 的行为。
+    @ViewBuilder
+    private func remoteContentNotice(_ inspection: EmailInspection) -> some View {
+        let count = RemoteContentScanner.remoteImageCount(in: inspection.originalHTML)
+        if !allowsRemoteContent, count > 0 {
+            HStack(spacing: 8) {
+                Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
+                Text("这封邮件包含 \(count) 张外部图片，已拦截 —— 发件人可通过它们得知你何时、看了几次")
+                    .font(.caption)
+                Spacer(minLength: 8)
+                Button("载入图片") { allowsRemoteContent = true }
+                    .controlSize(.small)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.orange.opacity(0.10))
+            Divider()
+        }
     }
 
     /// 是否加载外部图片。
