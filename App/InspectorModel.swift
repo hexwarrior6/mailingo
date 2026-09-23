@@ -81,6 +81,12 @@ final class InspectorModel: ObservableObject {
 
     /// 上一次处理过的请求 nonce，用来判断有没有新请求。
     private var lastHandledRequestNonce: String?
+    /// 当前显示这封的 Message-ID。
+    ///
+    /// 用它来判断"同一封邮件是不是来了更完整的版本" ——
+    /// Mail 对同一封会回调两次（先空壳、后完整），我们需要悄悄换上完整那份，
+    /// 否则内嵌图片会一直是空白。
+    private var currentInternetMessageID: String?
     /// messages 目录的上次修改时间，避免每次轮询都全量重读元数据。
     private var lastMessagesDirectoryStamp: Date?
 
@@ -126,6 +132,7 @@ final class InspectorModel: ObservableObject {
         }
 
         currentMessage = stored
+        currentInternetMessageID = stored.internetMessageID
         do {
             try await analyze(data: raw)
         } catch {
@@ -136,6 +143,7 @@ final class InspectorModel: ObservableObject {
     /// 用户从「打开 .eml…」选的文件。
     func load(fileURL: URL) async {
         currentMessage = nil
+        currentInternetMessageID = nil
         do {
             try await analyze(data: Data(contentsOf: fileURL))
         } catch {
@@ -157,19 +165,36 @@ final class InspectorModel: ObservableObject {
         Task { await load(messageID: id) }
     }
 
-    /// 轮询待处理请求。
+    /// 轮询 Mail 那边的动静。做两件事：
     ///
-    /// 为什么除了 URL scheme 还要轮询：容器 App 可能**已经在运行**，这时
-    /// LaunchServices 打开 URL 未必能把请求送进来；而且 appex 是沙盒进程，
-    /// 打开 URL 有失败的可能。轮询一个请求文件是兜底，代价只有一次读文件。
+    /// 1. **待处理请求** —— 为什么除了 URL scheme 还要轮询：容器 App 可能已经在
+    ///    运行，这时 LaunchServices 打开 URL 未必能把请求送进来；而且 appex 是
+    ///    沙盒进程，打开 URL 有失败的可能。读一个请求文件是兜底。
+    ///
+    /// 2. **更完整的版本** —— Mail 对同一封邮件会回调两次：先给"附件还没下载"
+    ///    的空壳（内嵌图片是空的），再给完整版。如果当前显示的是空壳，
+    ///    这里要悄悄换上完整那份，否则图片一直是空白。
     func pollPendingRequest() {
         refreshCapturedMessages()
+        upgradeToMoreCompleteVersionIfNeeded()
 
         guard let request = MessageStore.readPendingRequest(),
               request.nonce != lastHandledRequestNonce else { return }
 
         lastHandledRequestNonce = request.nonce
         Task { await load(messageID: request.messageID) }
+    }
+
+    /// 当前显示的是空壳版本时，换成同一封里最完整的那份。
+    private func upgradeToMoreCompleteVersionIfNeeded() {
+        guard let current = currentMessage,
+              let internetMessageID = currentInternetMessageID,
+              let best = MessageStore.mostComplete(forInternetMessageID: internetMessageID),
+              best.id != current.id,
+              best.byteCount > current.byteCount
+        else { return }
+
+        Task { await load(messageID: best.id) }
     }
 
     private func markCurrentRequestHandled() {

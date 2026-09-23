@@ -73,6 +73,15 @@ public enum MessageStore {
             capturedAt: Date()
         )
 
+        // 同一封邮件的旧版本（通常是"附件未下载"的空壳）直接删掉，
+        // 免得目录里越积越多。all() 已经会去重，这里是为了不占磁盘。
+        if let messageID = message.internetMessageID, !messageID.isEmpty {
+            for stale in all()
+            where stale.internetMessageID == messageID && stale.byteCount < message.byteCount {
+                removeFiles(id: stale.id)
+            }
+        }
+
         let rawURL = SharedPaths.messages.appendingPathComponent("\(id).eml")
         let metaURL = SharedPaths.messages.appendingPathComponent("\(id).json")
 
@@ -97,7 +106,21 @@ public enum MessageStore {
         try? Data(contentsOf: SharedPaths.messages.appendingPathComponent("\(id).eml"))
     }
 
-    /// 已捕获的邮件，按捕获时间倒序。
+    /// 已捕获的邮件，按捕获时间倒序。**同一封只返回一次。**
+    ///
+    /// ## 为什么必须去重
+    ///
+    /// Mail 对同一封邮件会回调**两次**：
+    /// 1. 先给"信封到了、附件还没下载"的版本 —— 内嵌图片部分是**空的**；
+    /// 2. 稍后再给完整版本 —— 图片是真实字节。
+    ///
+    /// 实测同一封 Message-ID 两次的字节数可以差 725 倍（24KB vs 18MB）。
+    /// 如果不去重：
+    /// - 下拉列表里同一封邮件会出现两次；
+    /// - 更糟的是**可能挑中空壳那一份**，于是内嵌图片全是空白。
+    ///
+    /// 这里按 `Message-ID` 归组，**保留字节数最多的那份**（最完整）。
+    /// 没有 Message-ID 的邮件无法归组，各自保留。
     public static func all() -> [StoredMessage] {
         let directory = SharedPaths.messages
         guard let entries = try? FileManager.default.contentsOfDirectory(
@@ -106,13 +129,41 @@ public enum MessageStore {
         ) else { return [] }
 
         let decoder = JSONDecoder.messages
-        return entries
+        let stored = entries
             .filter { $0.pathExtension == "json" }
             .compactMap { url -> StoredMessage? in
                 guard let data = try? Data(contentsOf: url) else { return nil }
                 return try? decoder.decode(StoredMessage.self, from: data)
             }
+
+        var bestByMessageID: [String: StoredMessage] = [:]
+        var ungrouped: [StoredMessage] = []
+
+        for message in stored {
+            guard let key = message.internetMessageID, !key.isEmpty else {
+                ungrouped.append(message)
+                continue
+            }
+            if let existing = bestByMessageID[key] {
+                if message.byteCount > existing.byteCount {
+                    bestByMessageID[key] = message
+                }
+            } else {
+                bestByMessageID[key] = message
+            }
+        }
+
+        return (Array(bestByMessageID.values) + ungrouped)
             .sorted { $0.capturedAt > $1.capturedAt }
+    }
+
+    /// 同一封邮件里，哪一份最完整（字节数最大）。
+    ///
+    /// 界面用它来判断"我现在显示的这份是不是空壳，要不要换成完整的"。
+    public static func mostComplete(forInternetMessageID internetMessageID: String) -> StoredMessage? {
+        all()
+            .filter { $0.internetMessageID == internetMessageID }
+            .max { $0.byteCount < $1.byteCount }
     }
 
     public static func mostRecent() -> StoredMessage? {
@@ -148,17 +199,22 @@ public enum MessageStore {
         return nil
     }
 
+    /// 删掉一封邮件的两个文件（.eml 与 .json）。
+    private static func removeFiles(id: String) {
+        for ext in ["eml", "json"] {
+            try? FileManager.default.removeItem(
+                at: SharedPaths.messages.appendingPathComponent("\(id).\(ext)")
+            )
+        }
+    }
+
     /// 超出上限就删掉最旧的（连同 .eml 和 .json）。
     private static func pruneIfNeeded() {
         let messages = all()
         guard messages.count > maxStoredMessages else { return }
 
         for message in messages[maxStoredMessages...] {
-            for ext in ["eml", "json"] {
-                try? FileManager.default.removeItem(
-                    at: SharedPaths.messages.appendingPathComponent("\(message.id).\(ext)")
-                )
-            }
+            removeFiles(id: message.id)
         }
     }
 }
