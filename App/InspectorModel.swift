@@ -199,17 +199,17 @@ final class InspectorModel: ObservableObject {
 
     /// 目录一动就立刻去问 Mail，而不是干等下一次轮询。
     ///
-    /// ## 为什么需要它
+    /// ## 它只在"来了新邮件"时有用 —— 别指望它解决切邮件卡顿
     ///
-    /// 定时轮询有个绕不过去的"发现延迟"：用户点了别的邮件之后，App 最坏要等
-    /// 一整拍才知道。而这段窗口里，上一封（比如一封很大的、带一堆图的）刚好
-    /// 解析完并画了出来 —— 用户就会看到它**一闪而过**，然后才跳到正确的那封。
+    /// 实测（2026-09-24，20 秒连续切邮件）**它一次都没触发过**：
+    /// Mail 只会为**还没解码过**的邮件调 `decodedMessage`，而这几个来回切的
+    /// 邮件早就捕获过了，不会再落盘。所以"在已看过的邮件之间切换"这个场景
+    /// 它帮不上忙，真正的原因是主线程被冻住（见 `applyOffMainThread`）。
     ///
-    /// 而 Mail 每把一封邮件交给扩展、扩展落盘，目录就有动静。这是"用户刚在
-    /// Mail 里动了"能拿到的**最早信号**，比定时器早得多。拿到就立刻去问一次
-    /// 选中项，把发现延迟从"最多一拍"压到"一次 AppleScript 往返"。
+    /// 保留它是因为"第一次打开一封新邮件"时确实能快一点：Mail 把它交给扩展、
+    /// 扩展落盘，目录就有动静，我们立刻去问一次选中项，比等定时器早。
     ///
-    /// 定时器仍然保留作兜底：万一某次落盘没触发目录事件，也不至于就一直不跟随。
+    /// 定时器是主力，这个是锦上添花。
     private func startWatchingMessagesDirectory() {
         let directory = SharedPaths.messages
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -587,7 +587,7 @@ final class InspectorModel: ObservableObject {
 
         guard !segments.isEmpty else {
             guard runToken == token else { return }
-            inspection = EmailInspector.apply(translations: [:], to: analysis)
+            inspection = await applyOffMainThread(translations: [:], to: analysis)
             translationStatus = .failed("这封邮件没有提取到可翻译的片段")
             return
         }
@@ -613,8 +613,11 @@ final class InspectorModel: ObservableObject {
         if !ignoringCache,
            let cached = await TranslationCache.shared.lookup(cacheKey, sourceHash: sourceHash),
            !cached.isEmpty {
+            // 守卫要在 await **之后**再对一次：apply 要跑 1.5 秒，
+            // 中间足够用户切走，过期结果绝不能落地
+            let applied = await applyOffMainThread(translations: cached, to: analysis)
             guard runToken == token else { return }
-            inspection = EmailInspector.apply(translations: cached, to: analysis)
+            inspection = applied
             translationStatus = .idle
             cacheStatus = .hit
             return
@@ -630,7 +633,10 @@ final class InspectorModel: ObservableObject {
                 targetLanguage: TranslationLanguages.simplifiedChinese,
                 progress: { [weak self] done, total in
                     Task { @MainActor in
-                        self?.translationStatus = .running(done: done, total: total)
+                        // 同样要按代次过滤：被取代的那次翻译还在跑时，
+                        // 它的进度不该盖到新邮件头上
+                        guard let self, self.runToken == token else { return }
+                        self.translationStatus = .running(done: done, total: total)
                     }
                 }
             )
@@ -646,7 +652,9 @@ final class InspectorModel: ObservableObject {
             guard runToken == token else { return }
             cacheStatus = .stored
 
-            inspection = EmailInspector.apply(translations: translations, to: analysis)
+            let applied = await applyOffMainThread(translations: translations, to: analysis)
+            guard runToken == token else { return }
+            inspection = applied
             translationStatus = .idle
         } catch is CancellationError {
             // 用户切了引擎或换了邮件，静默丢弃
@@ -654,7 +662,9 @@ final class InspectorModel: ObservableObject {
             guard runToken == token else { return }
             // 失败时仍然把原文渲染出来，并把原因讲清楚 ——
             // 总比一个空窗格好，用户至少能看到邮件内容。
-            inspection = EmailInspector.apply(translations: [:], to: analysis)
+            let applied = await applyOffMainThread(translations: [:], to: analysis)
+            guard runToken == token else { return }
+            inspection = applied
             translationStatus = .failed(Self.describe(error))
         }
     }
@@ -692,13 +702,19 @@ final class InspectorModel: ObservableObject {
         try Task.checkCancellation()
         guard loadToken == token else { return }
 
+        // 先用原样结果占位，再用引擎的结果替换。
+        //
+        // 注意顺序：**占位算好之前不能离开 .loading**。否则那 1.5 秒里
+        // state 是 .loaded、而 inspection 还是上一封的 —— 界面就会显示
+        // 上一封的内容，正是"一闪而过"那种观感。
+        let placeholder = await applyOffMainThread(translations: [:], to: analysis)
+        guard loadToken == token else { return }
+
         self.analysis = analysis
         self.sourceBytes = data.count
+        self.inspection = placeholder
         self.state = .loaded
         trace.notice("load 落地 \(self.currentMessage?.id ?? "?", privacy: .public) → 界面切到这一封")
-
-        // 先用原样结果占位，再用引擎的结果替换
-        self.inspection = EmailInspector.apply(translations: [:], to: analysis)
         restartTranslation(ignoringCache: ignoringCache)
     }
 
@@ -720,6 +736,28 @@ final class InspectorModel: ObservableObject {
         } onCancel: {
             task.cancel()
         }
+    }
+
+    /// 把译文写回 HTML 并做保真自检 —— **必须挪到后台**。
+    ///
+    /// `EmailInspector.apply` 是纯函数，但**很贵，而且贵得不显眼**：
+    /// 实测一封 287 KB HTML 的邮件要 **1.55 秒**（切片 + 两遍标签序列比对）。
+    /// 它跑在主 actor 上，会把整个界面连同轮询定时器一起冻住 —— 表现就是
+    /// "点别的邮件没反应，要等它转完才切过去"。
+    ///
+    /// 每封邮件它会被调用两次（先用空译文占位、译文回来再写一次），
+    /// 所以那封邮件实际冻了约 3 秒。
+    ///
+    /// 这里不接取消：`apply` 是非 throwing 的纯函数，中途停下只会返回一个
+    /// 错的结果。反正它在后台跑、不挡界面，过期的结果由调用方按
+    /// `runToken` / `loadToken` 丢弃就行。
+    private func applyOffMainThread(
+        translations: [Int: String],
+        to analysis: EmailAnalysis
+    ) async -> EmailInspection {
+        await Task.detached(priority: .userInitiated) {
+            EmailInspector.apply(translations: translations, to: analysis)
+        }.value
     }
 
     private static func describe(_ error: Error) -> String {
