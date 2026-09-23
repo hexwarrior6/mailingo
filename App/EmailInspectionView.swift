@@ -92,17 +92,31 @@ struct EmailInspectionView: View {
                     toolbarTrailing
                 }
                 Spacer(minLength: 0)
+                settingsButton
             }
             .padding(12)
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) { toolbarLeading; Spacer(minLength: 0) }
-                if isDeveloperMode {
-                    HStack(spacing: 10) { toolbarTrailing; Spacer(minLength: 0) }
+                HStack(spacing: 10) {
+                    if isDeveloperMode { toolbarTrailing; Spacer(minLength: 0) }
+                    settingsButton
                 }
             }
             .padding(12)
         }
+    }
+
+    /// 设置入口。
+    ///
+    /// 为什么放在窗口里而不是菜单栏：Mailingo 是附件 App（`LSUIElement`），
+    /// **没有菜单栏**，所以 `Mailingo → 设置…`（⌘,）那条路根本不存在。
+    /// 齿轮是用户唯一能摸到设置的地方。
+    private var settingsButton: some View {
+        SettingsLink {
+            Image(systemName: "gearshape")
+        }
+        .help("设置（缓存清理规则）")
     }
 
     @ViewBuilder

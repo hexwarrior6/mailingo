@@ -136,6 +136,14 @@ targets:
         CFBundlePackageType: APPL
         LSMinimumSystemVersion: "15.0"
         LSApplicationCategoryType: public.app-category.productivity
+        # ★ 轻量化：做成"附件 App"（agent）—— 不在 Dock 里露脸，也不进 ⌘Tab。
+        # 它的存在形态是"Mail 点一下才出现的那块译文面板"，不是常驻应用。
+        #
+        # 代价（都是刻意的）：
+        #   · 没有菜单栏 → 设置入口改到窗口工具栏里（见 EmailInspectionView）
+        #   · 图标只在 Finder 和 Mail 的扩展列表里看得到
+        #   · 没有 Dock 图标可点回来 → 靠 Mail 的横幅重新唤起
+        LSUIElement: true
         NSHumanReadableCopyright: "Mailingo"
         # 查询 Mail 当前选中的是哪一封（「跟随 Mail 自动切换」功能）。
         # 没有这一条，TCC 弹窗不会出现，脚本只会以 -10004 失败。

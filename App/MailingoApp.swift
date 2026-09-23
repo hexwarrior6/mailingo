@@ -8,6 +8,10 @@ struct MailingoApp: App {
     /// 「根视图」这一层接住，然后驱动具体的页面。
     @StateObject private var model = InspectorModel()
 
+    /// 轻量化行为：窗口一关就退出、以及把自己激活到前台。
+    /// 详见 `AppDelegate` 的注释。
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     var body: some Scene {
         // 用 Window 而不是 WindowGroup：**保证只有一个窗口**。
         // WindowGroup 在 macOS 上收到 URL（例如从 Mail 点横幅过来）时
@@ -41,6 +45,9 @@ struct RootView: View {
 
     @ObservedObject var model: InspectorModel
 
+    /// 用来在 `applicationShouldHandleReopen` 时把主窗口叫回来
+    @Environment(\.openWindow) private var openWindow
+
     @AppStorage(DeveloperMode.storageKey) private var isDeveloperMode = false
 
     /// 统一轮询：
@@ -61,7 +68,14 @@ struct RootView: View {
             .appleTranslationHost()
             // Mail 扩展点击横幅后经 mailingo:// 唤醒本 App
             .onOpenURL { url in
+                // 附件 App（LSUIElement）不会被系统自动激活。从 Mail 点横幅
+                // 过来时如果不喊这一声，窗口会开在 Mail 后面，用户以为没反应。
+                AppDelegate.activate()
                 model.handle(url: url)
+            }
+            // 在跑但主窗口已关（比如设置窗口还开着）时，用户又点了一次图标
+            .onReceive(NotificationCenter.default.publisher(for: .mailingoReopenMainWindow)) { _ in
+                openWindow(id: "main")
             }
             .onReceive(pollTimer) { _ in
                 model.pollPendingRequest()
