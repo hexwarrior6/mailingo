@@ -31,8 +31,12 @@ struct MailingoApp: App {
         }
 
         // 标准的 macOS 设置窗口：「Mailingo → 设置…」（⌘,）
+        //
+        // 把 model 传进去：设置里有几项（跟 Mail 联动）需要**和主窗口共用同一份
+        // 状态**。若在设置里用 `@AppStorage` 直接写 UserDefaults，模型那边
+        // 的属性不会跟着变，开关就成了摆设。
         Settings {
-            SettingsView()
+            SettingsView(model: model)
         }
     }
 }
@@ -47,6 +51,11 @@ struct RootView: View {
 
     /// 用来在 `applicationShouldHandleReopen` 时把主窗口叫回来
     @Environment(\.openWindow) private var openWindow
+    /// 用来在 Mail 关掉阅读窗口时收掉自己。
+    ///
+    /// 用 `dismissWindow(id:)` 而不是 `dismiss()`：后者是"关掉当前 presentation"，
+    /// 对 `Window`（单例窗口）场景语义不够明确；前者直接按 id 指名道姓地关。
+    @Environment(\.dismissWindow) private var dismissWindow
 
     @AppStorage(DeveloperMode.storageKey) private var isDeveloperMode = false
 
@@ -76,6 +85,10 @@ struct RootView: View {
             // 在跑但主窗口已关（比如设置窗口还开着）时，用户又点了一次图标
             .onReceive(NotificationCenter.default.publisher(for: .mailingoReopenMainWindow)) { _ in
                 openWindow(id: "main")
+            }
+            // Mail 关掉阅读窗口 → 也把自己收掉（窗口一关，App 就跟着退出）
+            .onReceive(NotificationCenter.default.publisher(for: .mailingoCloseMainWindow)) { _ in
+                dismissWindow(id: "main")
             }
             .onReceive(pollTimer) { _ in
                 model.pollPendingRequest()

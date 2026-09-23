@@ -104,6 +104,7 @@ final class InspectorModel: ObservableObject {
     }
 
     static let followsMailSelectionKey = "inspector.followsMailSelection"
+    static let closesWithMailKey = "inspector.closesWithMail"
 
     /// 已捕获的邮件（会话里来回好几封都会在这里，最新在前）。
     @Published private(set) var capturedMessages: [StoredMessage] = []
@@ -134,6 +135,33 @@ final class InspectorModel: ObservableObject {
     /// 上，取消后还要过一会儿才真的退出。中间这段时间足够它把旧邮件的内容
     /// 写进 `inspection`，把用户刚切过去的新邮件盖掉。
     private var loadToken = UUID()
+
+    /// Mail 关掉阅读窗口时，是否也把我们的窗口关掉（轻量化：窗口一关就退出）。
+    ///
+    /// 默认**开**。它只有在「跟随 Mail」打开时才起作用（信号就来自那次轮询），
+    /// 而「跟随 Mail」本身默认是关的 —— 所以不会有人被动地被关窗口。
+    @Published var closesWithMail: Bool =
+        UserDefaults.standard.object(forKey: InspectorModel.closesWithMailKey) as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(closesWithMail, forKey: Self.closesWithMailKey)
+            noViewerStreak = 0
+        }
+    }
+
+    /// 这次会话里**见到过** Mail 的阅读窗口。
+    ///
+    /// 这是自动关窗的前置条件，缺了它会误伤：从 Finder 打开 Mailingo 翻看
+    /// 已捕获的邮件时，Mail 可能压根没开 —— 那不是"窗口被关掉了"，
+    /// 我们不该把用户的窗口收走。
+    private var hasSeenMailViewer = false
+
+    /// 连续多少次轮询看到"没有阅读窗口"。用来去抖，避免 Mail 一瞬间的状态
+    /// 抖动就把窗口关掉。
+    private var noViewerStreak = 0
+
+    /// 连续多少次才认定"Mail 的阅读窗口真的关了"。
+    /// 轮询间隔 0.5 秒，所以 3 次 ≈ 1.5 秒。
+    private static let noViewerStreakThreshold = 3
 
     /// 当前正在跑的「问 Mail 选中了哪一封」的查询。
     /// 用来在发起新查询前取消旧的，避免 AppleScript 在串行队列上堆成一串。
@@ -432,6 +460,10 @@ final class InspectorModel: ObservableObject {
 
         switch outcome {
         case .success(let selection):
+            // 见到阅读窗口了 —— 之后它消失才算"被关掉"
+            hasSeenMailViewer = true
+            noViewerStreak = 0
+
             // Mail 的选中项变了 → 解除之前的手动抑制
             if selection.internetMessageID != lastMailSelectionID {
                 lastMailSelectionID = selection.internetMessageID
@@ -468,13 +500,46 @@ final class InspectorModel: ObservableObject {
             }
             switch selectionError {
             case .automationDenied:
+                noViewerStreak = 0
                 mailFollowStatus = .permissionDenied
+
+            case .noViewer, .mailNotRunning:
+                // Mail 的阅读窗口不在了（或 Mail 自己退了）。
+                // 这既是"等待"状态，也可能是"该收摊了"的信号。
+                mailFollowStatus = .waiting(selectionError.description)
+                handleMailViewerPossiblyGone()
+
             default:
+                noViewerStreak = 0
                 mailFollowStatus = selectionError.isTransient
                     ? .waiting(selectionError.description)
                     : .failed(selectionError.description)
             }
         }
+    }
+
+    /// Mail 的阅读窗口不见了 —— 判断要不要跟着收摊。
+    ///
+    /// 两道保险，缺一都会误伤：
+    ///
+    /// 1. **必须曾经见过阅读窗口**。从 Finder 打开 Mailingo 翻看已捕获的邮件时，
+    ///    Mail 可能压根没开 —— 那不是"窗口被关掉"，不该把用户的窗口收走。
+    /// 2. **必须连续几次都是这样**。Mail 在启动、切换、忙碌时都可能一瞬间
+    ///    报不出阅读窗口，抖一下就把窗口关掉太粗暴。
+    private func handleMailViewerPossiblyGone() {
+        guard closesWithMail, hasSeenMailViewer else { return }
+
+        noViewerStreak += 1
+        guard noViewerStreak >= Self.noViewerStreakThreshold else { return }
+
+        noViewerStreak = 0
+        hasSeenMailViewer = false   // 关掉之后要重新"见过"才会再触发
+        trace.notice("Mail 的阅读窗口关掉了（连续 \(Self.noViewerStreakThreshold) 次确认）→ 关闭本窗口")
+
+        // 窗口是 SwiftUI 的 Window 场景在管，AppKit 这边关不了它 ——
+        // 发通知让 RootView 用 `dismiss()` 收掉（然后 App 会因为
+        // 「最后一个窗口关闭即退出」而退出）。
+        NotificationCenter.default.post(name: .mailingoCloseMainWindow, object: nil)
     }
 
     /// 打开「系统设置 → 隐私与安全性 → 自动化」，引导用户授权。

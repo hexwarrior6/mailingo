@@ -7,6 +7,13 @@ extension Notification.Name {
     /// 由 SwiftUI 管生命周期，AppKit 这边造不出一个属于该场景的窗口。
     /// 所以 AppDelegate 只能发个通知，让 SwiftUI 那边用 `openWindow` 去开。
     static let mailingoReopenMainWindow = Notification.Name("com.zhuyuhao.Mailingo.reopenMainWindow")
+
+    /// 「把主窗口收掉」。用户开了「Mail 关掉阅读窗口时同时关闭 Mailingo」，
+    /// 而 Mail 那边的阅读窗口确实不见了。
+    ///
+    /// 同样是 SwiftUI 的 Window 场景归它自己管，AppKit 关不了，
+    /// 只能发通知让 RootView 用 `dismiss()` 收。
+    static let mailingoCloseMainWindow = Notification.Name("com.zhuyuhao.Mailingo.closeMainWindow")
 }
 
 /// 轻量化相关的应用级行为。

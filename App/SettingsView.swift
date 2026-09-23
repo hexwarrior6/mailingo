@@ -7,6 +7,9 @@ import SwiftUI
 /// 翻译缓存会一直变大，什么时候清、清到什么程度，应该由用户定。
 struct SettingsView: View {
 
+    /// 跟 Mail 联动的那几项要和主窗口共用状态，所以拿的是同一个模型。
+    @ObservedObject var model: InspectorModel
+
     @AppStorage(InspectorModel.cacheMaxAgeDaysKey)
     private var maxAgeDays = CachePolicy.default.maxAgeDays
 
@@ -18,6 +21,8 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            mailLinkageSection
+
             Section {
                 ageRow
                 sizeRow
@@ -62,6 +67,28 @@ struct SettingsView: View {
         }
         .onChange(of: maxSizeMB) { _, newValue in
             if newValue < 0 { maxSizeMB = 0 }
+        }
+    }
+
+    // MARK: - 跟 Mail 联动
+
+    /// Mail 那边收摊了，我们也跟着收。
+    ///
+    /// 检测信号来自「跟随 Mail」的轮询 —— Mail 的 AppleScript 会区分
+    /// 「没有阅读窗口」和「没选中邮件」，前者正是我们要的。所以这个开关
+    /// **依赖「跟随 Mail」**，没开跟随就没有信号，只能置灰。
+    private var mailLinkageSection: some View {
+        Section {
+            Toggle("Mail 关掉阅读窗口时，同时关闭 Mailingo", isOn: $model.closesWithMail)
+                .disabled(!model.followsMailSelection)
+
+            Text(model.followsMailSelection
+                 ? "窗口关掉后 App 会一并退出，下次从 Mail 的横幅重新唤起。"
+                 : "需要先在主窗口打开「跟随 Mail」—— 检测信号来自它的轮询。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } header: {
+            Text("跟 Mail 联动")
         }
     }
 
