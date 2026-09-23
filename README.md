@@ -173,6 +173,7 @@ make diagnose      # 地面真相：os_log + appex 是否被拉起 + 注册情�
 | `make diagnose` | os_log / appex 是否被拉起 / 注册情况 / 容器内容 |
 | `make log` / `make stream` | 跟随落盘日志 / 跟随 os_log |
 | `make refresh-plugins` | 重新注册扩展并列出 Mail 扩展 |
+| `make appicon ART=<画稿.png>` | 从画稿生成 App 图标（见下方「App 图标」） |
 | `make reset-log` | 清空探针日志与落盘的 MIME |
 | `make clean` | 清掉所有生成物 |
 
@@ -185,9 +186,11 @@ make diagnose      # 地面真相：os_log + appex 是否被拉起 + 注册情�
 ├── project.yml            # XcodeGen 工程定义（唯一事实来源，.xcodeproj 不入库）
 ├── Makefile               # 构建 / 安装 / 排查入口
 ├── App/                   # 容器 App（现在是看板；将来承载吸附式侧栏）
+│   └── Resources/         # Assets.xcassets —— App 图标，由 make appicon 生成
 ├── MailExtension/         # Mail 扩展（appex）
 ├── Shared/                # App 与 appex 共用代码
-├── Packages/MailingoKit/  # 核心逻辑：EmailCore（只依赖 Foundation）+ TranslationCore
+├── Packages/MailingoKit/  # 核心逻辑：EmailCore（只依赖 Foundation）+ TranslationCore + Cache
+├── Design/                # 视觉素材的**源文件**（画稿，不参与编译）
 ├── Scripts/               # 校验与判定脚本
 └── docs/
     ├── PRODUCT.md              # 产品需求（需求基线）
@@ -197,6 +200,40 @@ make diagnose      # 地面真相：os_log + appex 是否被拉起 + 注册情�
 
 `.xcodeproj`、`Support/`（Info.plist）、`.build/`、`.tools/` 都是生成物或本地工具，
 不进版本控制。**克隆后先跑 `make bootstrap`。**
+
+---
+
+## App 图标
+
+改图标只需要一张**满幅方形的画稿**（1024 或更大，别自己画圆角）：
+
+```sh
+make appicon ART=Design/AppIcon.png
+make gen && make build
+```
+
+`Design/AppIcon.png` 是当前画稿的源文件。`App/Resources/Assets.xcassets/` 里的
+PNG 是**生成物**，别手工编辑——跑 `make appicon` 会整个覆盖。
+
+**为什么要脚本，不能直接丢进 Assets.xcassets：**
+
+macOS 和 iOS 不一样，**不会替 App 裁圆角**，圆角与留白必须在图片里。而
+Apple 用的圆角又**不是圆角矩形**，是连续曲率的 squircle——实测（用系统自带的
+备忘录/提醒事项/照片，三者像素级一致）：形状占 824×824 居中，但顶边往下 40px
+处真实形状宽 679，而半径 185 的圆角矩形在那个深度只有 469。硬套圆角矩形会明显偏尖。
+所以脚本**直接从系统图标里把官方形状抠出来当蒙版**。
+
+顺带实测出来的两件事，也一并写在脚本里了：
+
+- **形状和投影要分家**。系统图标的 alpha 是"形状叠投影"的合成结果，直接拿来当
+  蒙版会给新图标套上一圈投影。脚本按阈值 128 分开（投影紧贴边缘最高只有 alpha
+  73，低于 128 会被整体滤掉），再补一次极轻的模糊还原平滑边缘。
+- **Apple 确实烘焙了投影**。实心底边之下还有约 44px 的投影。脚本的投影参数是
+  逐点对着系统图标的 alpha 轮廓量出来的（+8px→50 对系统 53，+16→30 对 34，
+  +24→13 对 16）。
+
+跑完会在 `.build/appicon-preview.png` 生成一张对照图（16/32/64/128/256 ×
+浅底/深底）——小尺寸下糊不糊，不装到系统里也看得出来。
 
 ---
 

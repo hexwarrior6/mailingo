@@ -125,6 +125,9 @@ targets:
     sources:
       - path: App
       - path: Shared
+      # 图标资源。用 Scripts/make-appicon.swift 从一张 1024 画稿生成 ——
+      # 别手工编辑 AppIcon.appiconset 里的 PNG，跑 `make appicon` 覆盖。
+      - path: App/Resources
     info:
       path: Support/Mailingo-Info.plist
       properties:
@@ -156,6 +159,7 @@ targets:
         PRODUCT_NAME: Mailingo
         PRODUCT_BUNDLE_IDENTIFIER: com.zhuyuhao.Mailingo
         COMBINE_HIDPI_IMAGES: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # 容器 App 保持非沙盒：V1.1 的「让 Mail 让出空间」需要 Accessibility，
         # 而 Accessibility API 在沙盒下不可用（docs/IMPLEMENTATION_PLAN.md §5.2）。
         ENABLE_APP_SANDBOX: NO
@@ -166,6 +170,7 @@ targets:
     sources:
       - path: MailExtension
       - path: Shared
+      - path: MailExtension/Resources
     dependencies:
       # 用统一的 MIMEHeaders（头部解析那份实现踩过 CRLF 与大小写两个坑，
       # 只留一处才不会又踩第二次）
@@ -186,6 +191,7 @@ targets:
       base:
         PRODUCT_NAME: MailingoMailExtension
         PRODUCT_BUNDLE_IDENTIFIER: com.zhuyuhao.Mailingo.MailExtension
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_MODULE_NAME: MailingoMailExtension
         SKIP_INSTALL: YES
         # ★ 必须为 YES。macOS 要求 app 扩展沙盒化，否则 pkd 不注册它，

@@ -11,13 +11,14 @@ LOG      := $(LOGDIR)/probe.log
 SPMDIR   := $(CURDIR)/.build/spm
 
 
-.PHONY: help bootstrap gen build test check-render run register status log stream diagnose clean reset-log install-app verify-appex refresh-plugins
+.PHONY: help bootstrap gen build test check-render run register status log stream diagnose clean reset-log install-app verify-appex refresh-plugins appicon
 
 help:
 	@echo "make bootstrap  下载 XcodeGen 到 .tools/（无需 sudo，固定版本；克隆后先跑这个）"
 	@echo "make gen        生成 Mailingo.xcodeproj（XcodeGen）"
 	@echo "make build      编译（含 appex 嵌入）"
 	@echo "make test       跑 EmailCore 单元测试（23 个）"
+	@echo "make appicon    从 ART=<画稿.png> 生成 App 图标（1024 方形）"
 	@echo "make run        编译并启动容器 App（探针看板）"
 	@echo "make register   向 pluginkit 注册 appex，并列出 Mail 扩展"
 	@echo "make status     打印 S0 判定摘要"
@@ -75,6 +76,22 @@ check-render:
 	  -sdk "$$(xcrun --show-sdk-path --sdk macosx)" \
 	  Scripts/render-check.swift "$(CURDIR)/.build/render-check.png"
 	@open "$(CURDIR)/.build/render-check.png" 2>/dev/null || true
+
+# 生成 App 图标。
+#
+# macOS 不会替 App 裁圆角，圆角形状又是个连续曲率的 squircle（不是圆角矩形），
+# 所以这一步必须走脚本。用法：
+#   make appicon ART=~/Downloads/icon.png
+# 脚本细节与实测依据见 Scripts/make-appicon.swift 的文件头。
+appicon:
+	@test -n "$(ART)" || { \
+		echo "❌ 需要指定画稿：make appicon ART=<1024方形.png>"; exit 1; }
+	@mkdir -p "$(SPMDIR)/tmp" "$(CURDIR)/.build/swiftcache"
+	@TMPDIR="$(SPMDIR)/tmp" swift \
+	  -module-cache-path "$(CURDIR)/.build/swiftcache" \
+	  -sdk "$$(xcrun --show-sdk-path --sdk macosx)" \
+	  Scripts/make-appicon.swift "$(ART)"
+	@echo "→ 接着跑 make gen && make build"
 
 test:
 	@mkdir -p "$(SPMDIR)/tmp" "$(SPMDIR)/mc"
