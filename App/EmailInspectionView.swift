@@ -366,6 +366,12 @@ struct EmailInspectionView: View {
                     if inspection.usedPlainTextFallback {
                         chip("纯文本回退", color: .orange)
                     }
+
+                    // 被标签切开的孤立虚词：无上下文引擎下会保留原文
+                    let orphanCount = inspection.segments.filter(\.isContextlessOrphan).count
+                    if orphanCount > 0 {
+                        chip(orphanChipLabel(count: orphanCount), color: .orange)
+                    }
                 }
             }
 
@@ -380,6 +386,16 @@ struct EmailInspectionView: View {
                     .textSelection(.enabled)
             }
         }
+    }
+
+    /// 孤立片段那个 chip 的文案。
+    ///
+    /// 分两种情况是有意义的：Apple 这类看不到上下文的引擎会**跳过**它们
+    /// （保留原文），而将来的 LLM 有上下文、会照常翻译。
+    private func orphanChipLabel(count: Int) -> String {
+        model.skipsContextlessOrphans
+            ? "跳过 \(count) 段孤立片段"
+            : "\(count) 段孤立片段（交给引擎翻）"
     }
 
     private func segmentsTable(_ inspection: EmailInspection) -> some View {

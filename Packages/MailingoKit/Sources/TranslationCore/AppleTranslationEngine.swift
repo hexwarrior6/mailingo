@@ -11,6 +11,11 @@ public struct AppleTranslationEngine: TranslationEngine {
     public let id = "apple.translation.v1"
     public let displayName = "Apple 翻译（系统内置）"
 
+    /// Apple 的接口只接受"要翻的这段文本"，没有上下文参数 → 看不到语境。
+    /// 因此像 `<b>9:00</b> to <b>11:00</b>` 里的 ` to ` 会被管线剔出去、
+    /// 保留原文（翻错比不翻更糟）。LLM 引擎则可以拿到整封邮件的文本。
+    public let hasFullContext = false
+
     /// 每批段数。
     ///
     /// Apple 的批量接口一次塞太多会被限流甚至超时，而**单批失败会让整封信失败**，

@@ -10,6 +10,10 @@ import Foundation
 /// 不需要任何权限就能端到端跑通（方案 §6）。
 public struct MarkerTranslationEngine: TranslationEngine {
 
+    /// 调试引擎不做真实翻译，声明有完整上下文，
+    /// 这样在开发者模式下能看到**全部**片段（包括孤立虚词），便于对比。
+    public var hasFullContext: Bool { true }
+
     public let id = "fake.marker.v1"
     public let displayName = "标记替换（调试用）"
 
@@ -45,6 +49,10 @@ public struct MarkerTranslationEngine: TranslationEngine {
 
 /// 原样返回的引擎，用于验证「不翻译时切片结果必须与原文逐字节相同」。
 public struct IdentityTranslationEngine: TranslationEngine {
+
+    /// 调试引擎不做真实翻译，声明有完整上下文，
+    /// 这样在开发者模式下能看到**全部**片段（包括孤立虚词），便于对比。
+    public var hasFullContext: Bool { true }
     public let id = "fake.identity.v1"
     public let displayName = "原样返回（测试用）"
 
@@ -73,6 +81,10 @@ public struct IdentityTranslationEngine: TranslationEngine {
 
 /// 会失败 / 会慢的引擎，用来验证 UI 的错误态与进度显示。
 public struct FailingTranslationEngine: TranslationEngine {
+
+    /// 调试引擎不做真实翻译，声明有完整上下文，
+    /// 这样在开发者模式下能看到**全部**片段（包括孤立虚词），便于对比。
+    public var hasFullContext: Bool { true }
     public let id = "fake.failing.v1"
     public let displayName = "必定失败（测试用）"
 

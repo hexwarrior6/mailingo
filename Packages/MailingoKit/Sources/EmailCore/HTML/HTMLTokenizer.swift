@@ -21,12 +21,46 @@ struct HTMLTokenizer {
         let range: Range<String.Index>
         /// 祖先标签名，由内到外。
         let ancestorTags: [String]
+        /// 最近的**块级**祖先元素（`p` / `td` / `li` / `div` …）。
+        ///
+        /// 判断两个文本节点是不是"同一个段落里被行内标签切开的兄弟"。
+        /// 这个信息同时也是将来喂给 LLM 做上下文分组的依据。
+        let blockAncestor: BlockContext?
+    }
+
+    /// 一个块级容器的**身份**。
+    ///
+    /// 必须带 `elementID` 而不是只比标签名：`<p>to</p><p>to</p>` 里两个 `p`
+    /// 名字相同却是**不同的**段落，各自的 `to` 都是完整语境，不能算兄弟。
+    /// elementID 用该标签在原文里的起始偏移，天然唯一。
+    struct BlockContext: Equatable {
+        let tag: String
+        let elementID: Int
+    }
+
+    /// 标签栈里的一项。
+    private struct OpenElement {
+        let name: String
+        let id: Int
     }
 
     /// 自闭合 / 空元素：不入栈。
     private static let voidElements: Set<String> = [
         "area", "base", "br", "col", "embed", "hr", "img", "input",
         "link", "meta", "param", "source", "track", "wbr"
+    ]
+
+    /// 块级元素：它们划分"文本块"。
+    ///
+    /// 判断依据是"这个标签会不会开启一个新的文本容器"。
+    /// 注意 `table` / `tr` 也算了进去 —— 单元格文字所在的是 `td`，
+    /// 而 `td` 本来就在里面，所以取"最内层"的那个就能拿到 `td`。
+    private static let blockLevelElements: Set<String> = [
+        "address", "article", "aside", "blockquote", "body", "caption", "center",
+        "dd", "details", "div", "dl", "dt", "fieldset", "figcaption", "figure",
+        "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "li",
+        "main", "nav", "ol", "p", "pre", "section", "summary", "table",
+        "tbody", "td", "tfoot", "th", "thead", "tr", "ul"
     ]
 
     /// 内容不能当普通文本处理的元素。
@@ -39,7 +73,7 @@ struct HTMLTokenizer {
     /// 取出所有文本节点。
     static func textRuns(in html: String) -> [TextRun] {
         var runs: [TextRun] = []
-        var stack: [String] = []
+        var stack: [OpenElement] = []
         var i = html.startIndex
 
         while i < html.endIndex {
@@ -51,7 +85,12 @@ struct HTMLTokenizer {
                 while j < html.endIndex, html[j] != "<" {
                     j = html.index(after: j)
                 }
-                runs.append(TextRun(range: i..<j, ancestorTags: stack))
+                runs.append(TextRun(
+                    range: i..<j,
+                    ancestorTags: stack.map(\.name),
+                    blockAncestor: stack.last { blockLevelElements.contains($0.name) }
+                        .map { BlockContext(tag: $0.name, elementID: $0.id) }
+                ))
                 i = j
                 continue
             }
@@ -79,7 +118,12 @@ struct HTMLTokenizer {
             // ── 标签
             guard let gt = html[i...].firstIndex(of: ">") else {
                 // 落单的 '<' 没有闭合：当普通文本处理，别把后面的内容整段吃掉
-                runs.append(TextRun(range: i..<html.endIndex, ancestorTags: stack))
+                runs.append(TextRun(
+                    range: i..<html.endIndex,
+                    ancestorTags: stack.map(\.name),
+                    blockAncestor: stack.last { blockLevelElements.contains($0.name) }
+                        .map { BlockContext(tag: $0.name, elementID: $0.id) }
+                ))
                 break
             }
 
@@ -90,7 +134,7 @@ struct HTMLTokenizer {
                 let name = tagName(from: inner.dropFirst())
                 // 宽松闭合：往下找最近的同名标签，把它及其内层一起弹出。
                 // 真实邮件里标签经常不配对，严格的栈会越走越歪。
-                if let idx = stack.lastIndex(of: name) {
+                if let idx = stack.lastIndex(where: { $0.name == name }) {
                     stack.removeSubrange(idx...)
                 }
             } else {
@@ -98,7 +142,8 @@ struct HTMLTokenizer {
                 let name = tagName(from: isSelfClosing ? inner.dropLast() : inner)
 
                 if !isSelfClosing, !voidElements.contains(name), !name.isEmpty {
-                    stack.append(name)
+                    // 用 '<' 的偏移作为这个元素的唯一身份
+                    stack.append(OpenElement(name: name, id: html.distance(from: html.startIndex, to: i)))
 
                     if skippedContentElements.contains(name) {
                         // 内容整体跳过，但要先把这一段"消化"掉，
@@ -106,12 +151,12 @@ struct HTMLTokenizer {
                         let afterOpen = html.index(after: gt)
                         if let closeRange = findClosingTag(name, in: html, from: afterOpen) {
                             // 弹出刚压入的这个标签
-                            if stack.last == name { stack.removeLast() }
+                            if stack.last?.name == name { stack.removeLast() }
                             i = closeRange
                             continue
                         } else {
                             // 没有闭合标签：保守起见不消费内容，按普通标签继续
-                            if stack.last == name { stack.removeLast() }
+                            if stack.last?.name == name { stack.removeLast() }
                         }
                     }
                 }

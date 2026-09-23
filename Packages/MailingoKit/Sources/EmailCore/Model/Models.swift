@@ -74,6 +74,17 @@ public struct TranslationSegment: Sendable, Identifiable {
     public let coreRange: Range<String.Index>
     /// 上下文里的祖先标签名（由内到外），供将来给 LLM 提供语境。
     public let ancestorTags: [String]
+    /// 最近的块级祖先标签。同一段落里的片段靠它归组。
+    public let blockAncestor: String?
+    /// 是否是「被行内标签切开的孤立虚词」。
+    ///
+    /// 典型来源：`<b>9:00</b> to <b>11:00</b>` 里的 `to`、
+    /// `14<sup>th</sup>` 里的 `th`。这类片段脱离上下文就没法翻对。
+    ///
+    /// 注意：**是否跳过它由引擎决定** —— 拿到完整上下文的 LLM 能翻对，
+    /// 而 Apple 翻译的接口只收一段文本、看不到上下文，所以要跳过。
+    /// 见 `TranslationEngine.hasFullContext`。
+    public let isContextlessOrphan: Bool
 
     public init(
         id: Int,
@@ -81,7 +92,9 @@ public struct TranslationSegment: Sendable, Identifiable {
         sourceText: String,
         range: Range<String.Index>,
         coreRange: Range<String.Index>,
-        ancestorTags: [String]
+        ancestorTags: [String],
+        blockAncestor: String? = nil,
+        isContextlessOrphan: Bool = false
     ) {
         self.id = id
         self.kind = kind
@@ -89,6 +102,8 @@ public struct TranslationSegment: Sendable, Identifiable {
         self.range = range
         self.coreRange = coreRange
         self.ancestorTags = ancestorTags
+        self.blockAncestor = blockAncestor
+        self.isContextlessOrphan = isContextlessOrphan
     }
 }
 
@@ -174,6 +189,15 @@ public protocol TranslationEngine: Sendable {
     var id: String { get }
     var displayName: String { get }
 
+    /// 引擎是否拿得到**完整语境**。
+    ///
+    /// - Apple 翻译的接口只接受"要翻的这段文本"，看不到上下文 → `false`。
+    ///   于是像 ` to `、`th` 这种被行内标签切开的孤立虚词会被管线**剔出去、
+    ///   保留原文** —— 翻错比不翻更糟。
+    /// - LLM 引擎可以把整封邮件的文本作为输入一起给它 → `true`，
+    ///   这类片段由模型自己看着上下文翻。
+    var hasFullContext: Bool { get }
+
     /// 查询语言对可用性。`source` 为 nil 表示交给引擎自动检测。
     func availability(source: Locale.Language?, target: Locale.Language) async -> TranslationAvailability
 
@@ -193,6 +217,9 @@ public protocol TranslationEngine: Sendable {
 }
 
 extension TranslationEngine {
+    /// 默认认为引擎看不到上下文（保守：宁可少翻，不要翻错）。
+    public var hasFullContext: Bool { false }
+
     /// 不需要进度的调用方用这个。
     public func translate(
         segments: [TranslationSegment],

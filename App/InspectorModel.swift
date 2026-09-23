@@ -31,6 +31,9 @@ final class InspectorModel: ObservableObject {
         }
     }
 
+    /// 当前引擎是不是"看不到上下文"，因而孤立片段会被跳过、保留原文。
+    var skipsContextlessOrphans: Bool { !effectiveEngine.hasFullContext }
+
     /// 当前显示的到底是不是真译文。
     ///
     /// 开发者模式关闭时引擎被强制成 Apple 翻译，所以恒为 true；
@@ -223,11 +226,17 @@ final class InspectorModel: ObservableObject {
             return
         }
 
-        translationStatus = .running(done: 0, total: segments.count)
+        // 引擎看不到上下文时，把孤立虚词剔出去（保留原文）——
+        // 翻错比不翻更糟。LLM 有上下文，这类片段交给它翻。
+        let engineSegments = engine.hasFullContext
+            ? segments
+            : segments.filter { !$0.isContextlessOrphan }
+
+        translationStatus = .running(done: 0, total: engineSegments.count)
 
         do {
             let translated = try await engine.translate(
-                segments: segments,
+                segments: engineSegments,
                 sourceLanguage: nil,
                 targetLanguage: TranslationLanguages.simplifiedChinese,
                 progress: { [weak self] done, total in
