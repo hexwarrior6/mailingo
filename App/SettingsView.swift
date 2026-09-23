@@ -13,14 +13,6 @@ struct SettingsView: View {
     @AppStorage(InspectorModel.cacheMaxSizeMBKey)
     private var maxSizeMB = CachePolicy.default.maxSizeMB
 
-    /// 开发者模式。
-    ///
-    /// 原先只有菜单栏的「显示 → 开发者模式」（⌘⇧D）一个入口。但 Mailingo 是
-    /// 附件 App（`LSUIElement`），**没有菜单栏**，那条路就断了 ——
-    /// 而它恰好是排查"缓存有没有命中"的唯一入口，不能没有。
-    @AppStorage(DeveloperMode.storageKey)
-    private var isDeveloperMode = false
-
     @State private var statistics = CacheStatistics()
     @State private var message: String?
 
@@ -35,15 +27,6 @@ struct SettingsView: View {
                 Text("同一封邮件只翻译一次。缓存按「最近使用时间」淘汰 —— 常用的不会因为放得久就被删。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-
-            Section {
-                Toggle("开发者模式", isOn: $isDeveloperMode)
-                Text("打开后主窗口会多出「S0 探针」页签、片段表格、缓存命中情况等诊断信息。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } header: {
-                Text("诊断")
             }
 
             Section {

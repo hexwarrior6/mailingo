@@ -11,24 +11,22 @@ extension Notification.Name {
 
 /// 轻量化相关的应用级行为。
 ///
-/// 产品形态是「Mail 点一下才出现的那块译文面板」，不是一个常驻应用。
-/// 所以这里两件事：
+/// ## 形态：常规 App + 关窗即退出
 ///
-/// 1. **窗口一关就退出**，不留后台进程、不占内存。
-/// 2. **主动把自己激活到前台**。附件 App（`LSUIElement`）不会被系统自动
-///    激活 —— 从 Mail 横幅唤起时窗口会开在 Mail 后面，用户以为没反应。
+/// Dock 图标和菜单栏都**保留**（所以 ⌘, 设置、⌘⇧D 开发者模式照常可用），
+/// 轻量化靠的是"窗口一关就退出"—— 不是隐藏 Dock 图标。
+///
+/// 这条区别是有代价教训的：早先试过 `LSUIElement`，它会把菜单栏一起带走，
+/// 于是设置和开发者模式都得另找地方放。而"关窗即退出"本来就足以让
+/// 不用它的时候不占内存，没必要再牺牲菜单栏。
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
-    /// 最后一个窗口关掉就退出。
+    /// 最后一个窗口关掉就退出，不留后台进程。
     ///
-    /// 注意"最后一个"：如果设置窗口开着，关掉主窗口不会退出 —— 那是对的，
+    /// 注意是"最后一个"：设置窗口开着时关掉主窗口不会退出 —— 那是对的，
     /// 用户还在用这个 App。两个都关掉才走。
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
-    }
-
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        activate()
     }
 
     /// 已经在运行、用户又点了它一次（Finder / Spotlight / Launchpad）。
@@ -46,7 +44,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    /// 附件 App 不会自动到前台，得自己喊一声。
+    /// 把自己激活到前台。
+    ///
+    /// 常规 App 通常由系统负责激活，这里只在收到 `mailingo://` 时兜一道：
+    /// 万一 App 已经在后台跑着，用户点了 Mail 里的横幅却没看到窗口浮上来，
+    /// 那这个功能就等于没反应。
     static func activate() {
         NSApp.activate()
     }

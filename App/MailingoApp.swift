@@ -68,8 +68,8 @@ struct RootView: View {
             .appleTranslationHost()
             // Mail 扩展点击横幅后经 mailingo:// 唤醒本 App
             .onOpenURL { url in
-                // 附件 App（LSUIElement）不会被系统自动激活。从 Mail 点横幅
-                // 过来时如果不喊这一声，窗口会开在 Mail 后面，用户以为没反应。
+                // 兜一道：App 可能已经在后台跑着，用户点了 Mail 里的横幅
+                // 却没看到窗口浮上来 —— 那这个功能就等于没反应。
                 AppDelegate.activate()
                 model.handle(url: url)
             }
