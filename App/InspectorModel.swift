@@ -533,8 +533,16 @@ final class InspectorModel: ObservableObject {
             case .noViewer, .mailNotRunning:
                 // Mail 的阅读窗口不在了（或 Mail 自己退了）。
                 // 这既是"等待"状态，也可能是"该收摊了"的信号。
+                //
+                // ★ 顺序很重要：**先判要不要收摊，要收就别先设 .waiting**。
+                // 窗口的关闭动画有零点几秒，那期间内容还在渲染 ——
+                // 先设了状态，用户就会看到"Mail 没有打开阅读窗口"转一下
+                // 再消失，正是激进模式要避免的那半秒。
+                if mailViewerShouldClose() {
+                    closeForMailViewerGone()
+                    return
+                }
                 mailFollowStatus = .waiting(selectionError.description)
-                handleMailViewerPossiblyGone()
 
             default:
                 noViewerStreak = 0
@@ -545,27 +553,31 @@ final class InspectorModel: ObservableObject {
         }
     }
 
-    /// Mail 的阅读窗口不见了 —— 判断要不要跟着收摊。
+    /// Mail 的阅读窗口不见了 —— 记一次，并判断是否该跟着收摊。
     ///
     /// 两道保险，缺一都会误伤：
     ///
     /// 1. **必须曾经见过阅读窗口**。从 Finder 打开 Mailingo 翻看已捕获的邮件时，
     ///    Mail 可能压根没开 —— 那不是"窗口被关掉"，不该把用户的窗口收走。
+    ///    这是**正确性**，不是延迟，所以激进模式也不放开它。
     /// 2. **必须连续几次都是这样**。Mail 在启动、切换、忙碌时都可能一瞬间
-    ///    报不出阅读窗口，抖一下就把窗口关掉太粗暴。
-    private func handleMailViewerPossiblyGone() {
-        guard closesWithMail, hasSeenMailViewer else { return }
-
+    ///    报不出阅读窗口，抖一下就把窗口关掉太粗暴。这是纯速度代价，
+    ///    激进模式把它降到 1 次。
+    private func mailViewerShouldClose() -> Bool {
+        guard closesWithMail, hasSeenMailViewer else { return false }
         noViewerStreak += 1
-        let threshold = noViewerStreakThreshold
-        guard noViewerStreak >= threshold else { return }
+        return noViewerStreak >= noViewerStreakThreshold
+    }
 
+    /// 收摊：关掉自己的窗口（连带退出 App）。
+    private func closeForMailViewerGone() {
+        let threshold = noViewerStreakThreshold
         noViewerStreak = 0
         hasSeenMailViewer = false   // 关掉之后要重新"见过"才会再触发
         trace.notice("Mail 的阅读窗口关掉了（确认 \(threshold) 次）→ 关闭本窗口")
 
         // 窗口是 SwiftUI 的 Window 场景在管，AppKit 这边关不了它 ——
-        // 发通知让 RootView 用 `dismiss()` 收掉（然后 App 会因为
+        // 发通知让 RootView 用 `dismissWindow(id:)` 收掉（然后 App 会因为
         // 「最后一个窗口关闭即退出」而退出）。
         NotificationCenter.default.post(name: .mailingoCloseMainWindow, object: nil)
     }
