@@ -7,6 +7,18 @@ import os
 /// - Mail 被隐藏（右键 Dock 图标 → 隐藏，或 ⌘H）→ 我们也隐藏
 /// - Mail 重新显示 → 我们也显示，并把窗口提到最前
 ///
+/// ## 为什么**不**跟"Mail 被激活"
+///
+/// 一开始还挂了 `didActivateApplicationNotification`，想做到"Mail 一到前台我们
+/// 也到前台"。但那会撞上一个死结：**"你单击 Mail"和"Mail 到前台"是同一个事件**。
+///
+/// 于是两窗口重叠、我们在上面时，你单击 Mail 想让它上来 —— 通知立刻触发，
+/// 我们又把位置抢回去。你点第二次才正常，因为那时 Mail 已经是活动 App，
+/// 不会再发激活通知。
+///
+/// "单击 Mail"并不等于"Mail 被打开"。用户说的「打开 / 隐藏」是一对，
+/// 对应的是 **unhide / hide**，跟"激活"没有关系。所以只跟这两个。
+///
 /// ## 为什么用 `didHide` 而不是 `didDeactivate`
 ///
 /// 这两件事在 macOS 里是**各自独立的通知**，语义完全不同：
@@ -67,18 +79,15 @@ final class MailActivationFollower {
         guard observers.isEmpty else { return }
         let center = NSWorkspace.shared.notificationCenter
 
-        // 显示：Mail 被激活，或从隐藏状态恢复
-        for name in [NSWorkspace.didActivateApplicationNotification,
-                     NSWorkspace.didUnhideApplicationNotification] {
-            observers.append(center.addObserver(
-                forName: name,
-                object: nil,
-                queue: .main
-            ) { [weak self] note in
-                guard let self, Self.isMail(note) else { return }
-                self.mailBecameVisible()
-            })
-        }
+        // 显示：**只**跟"从隐藏状态恢复"，不跟"被激活"。理由见类注释。
+        observers.append(center.addObserver(
+            forName: NSWorkspace.didUnhideApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self, Self.isMail(note) else { return }
+            self.mailBecameVisible()
+        })
 
         // 隐藏：**只有**用户主动隐藏 Mail 才会触发（见类注释里的对比表）
         observers.append(center.addObserver(
