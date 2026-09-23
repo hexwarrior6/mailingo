@@ -91,6 +91,21 @@ targets:
         SKIP_INSTALL: YES
         ENABLE_APP_SANDBOX: NO
 
+  MailIntegration:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Packages/MailingoKit/Sources/MailIntegration
+    dependencies:
+      - target: EmailCore
+    settings:
+      base:
+        PRODUCT_NAME: MailIntegration
+        PRODUCT_BUNDLE_IDENTIFIER: com.zhuyuhao.Mailingo.MailIntegration
+        DEFINES_MODULE: YES
+        SKIP_INSTALL: YES
+        ENABLE_APP_SANDBOX: NO
+
   Mailingo:
     type: application
     platform: macOS
@@ -106,6 +121,9 @@ targets:
         LSMinimumSystemVersion: "15.0"
         LSApplicationCategoryType: public.app-category.productivity
         NSHumanReadableCopyright: "Mailingo"
+        # 查询 Mail 当前选中的是哪一封（「跟随 Mail 自动切换」功能）。
+        # 没有这一条，TCC 弹窗不会出现，脚本只会以 -10004 失败。
+        NSAppleEventsUsageDescription: "Mailingo 需要读取 Mail 当前选中的邮件，才能在你切换邮件时自动翻译那一封。"
         # Mail 扩展点击横幅后用它唤醒容器 App（appex 是沙盒进程，
         # 只能通过 LaunchServices 打开已注册的 URL scheme 来拉起别的 App）
         CFBundleURLTypes:
@@ -118,6 +136,7 @@ targets:
         codeSign: true
       - target: EmailCore
       - target: TranslationCore
+      - target: MailIntegration
     settings:
       base:
         PRODUCT_NAME: Mailingo

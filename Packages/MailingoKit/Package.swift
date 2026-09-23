@@ -11,11 +11,13 @@ let package = Package(
     platforms: [.macOS(.v15)],
     products: [
         .library(name: "EmailCore", targets: ["EmailCore"]),
-        .library(name: "TranslationCore", targets: ["TranslationCore"])
+        .library(name: "TranslationCore", targets: ["TranslationCore"]),
+        .library(name: "MailIntegration", targets: ["MailIntegration"])
     ],
     targets: [
         .target(name: "EmailCore"),
         .target(name: "TranslationCore", dependencies: ["EmailCore"]),
+        .target(name: "MailIntegration", dependencies: ["EmailCore"]),
         .testTarget(
             name: "EmailCoreTests",
             dependencies: ["EmailCore"],
@@ -24,6 +26,10 @@ let package = Package(
         .testTarget(
             name: "TranslationCoreTests",
             dependencies: ["TranslationCore", "EmailCore"]
+        ),
+        .testTarget(
+            name: "MailIntegrationTests",
+            dependencies: ["MailIntegration", "EmailCore"]
         )
     ],
     // 与 App target 的 SWIFT_VERSION=5.0 保持一致。

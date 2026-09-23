@@ -218,6 +218,7 @@ struct EmailInspectionView: View {
             Divider()
             displayModeBar
             Divider()
+            mailFollowNotice
             remoteContentNotice(inspection)
 
             // VSplitView：中间那条分隔线可以**上下拖拽**，用来调整
@@ -265,10 +266,58 @@ struct EmailInspectionView: View {
 
             Spacer(minLength: 0)
 
+            followMailToggle
             remoteContentToggle
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+
+    /// 「跟随 Mail」出问题时的提示。
+    ///
+    /// 权限被拒**必须**说出来：否则用户打开了开关却毫无反应，只能干等。
+    @ViewBuilder
+    private var mailFollowNotice: some View {
+        switch model.mailFollowStatus {
+        case .off, .following:
+            EmptyView()
+
+        case .waiting(let reason):
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(reason).font(.caption).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Color.secondary.opacity(0.06))
+
+        case .permissionDenied:
+            HStack(spacing: 8) {
+                Image(systemName: "lock.fill").foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("需要「自动化」权限才能跟随 Mail").font(.caption)
+                    Text("系统设置 → 隐私与安全性 → 自动化 → 勾选 Mailingo")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Button("打开系统设置") { model.openAutomationSettings() }
+                    .controlSize(.small)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.orange.opacity(0.10))
+
+        case .failed(let reason):
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Text(reason).font(.caption).textSelection(.enabled)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.orange.opacity(0.10))
+        }
     }
 
     /// 外部图片被拦截时的提示条。
@@ -296,6 +345,21 @@ struct EmailInspectionView: View {
             .background(Color.orange.opacity(0.10))
             Divider()
         }
+    }
+
+    /// 跟随 Mail 的选中项自动切换。
+    ///
+    /// 需要「自动化」权限 —— 第一次打开会弹系统授权框。
+    /// 这是唯一能**精确**知道"用户在看哪一封"的办法：Mail 只推邮件内容，
+    /// 不推"当前选中项"，而被动解码事件里有大量批量解码噪声。
+    private var followMailToggle: some View {
+        Toggle(isOn: $model.followsMailSelection) {
+            Label("跟随 Mail", systemImage: "arrow.triangle.2.circlepath")
+                .font(.caption)
+        }
+        .toggleStyle(.button)
+        .controlSize(.small)
+        .help("打开后，你在 Mail 里点开哪一封，这里就自动切到那一封并翻译（需要授权「自动化」）")
     }
 
     /// 是否加载外部图片。

@@ -1,5 +1,7 @@
+import AppKit
 import EmailCore
 import Foundation
+import MailIntegration
 import SwiftUI
 import TranslationCore
 
@@ -49,6 +51,18 @@ final class InspectorModel: ObservableObject {
         case loaded
     }
 
+    /// 「跟随 Mail 自动切换」的状态。
+    enum MailFollowStatus: Equatable {
+        case off
+        /// 正在跟随，一切正常
+        case following
+        /// 瞬时状态：Mail 没开、没有阅读窗口、或选中的邮件还没同步过来
+        case waiting(String)
+        /// 需要用户在系统设置里授权「自动化」
+        case permissionDenied
+        case failed(String)
+    }
+
     enum TranslationStatus: Equatable {
         case idle
         case running(done: Int, total: Int)
@@ -58,6 +72,25 @@ final class InspectorModel: ObservableObject {
     @Published private(set) var state: LoadState = .idle
     @Published private(set) var inspection: EmailInspection?
     @Published private(set) var translationStatus: TranslationStatus = .idle
+    @Published private(set) var mailFollowStatus: MailFollowStatus = .off
+
+    /// 是否跟随 Mail 的选中项自动切换。持久化 —— 这是个长期偏好。
+    @Published var followsMailSelection: Bool =
+        UserDefaults.standard.bool(forKey: InspectorModel.followsMailSelectionKey) {
+        didSet {
+            UserDefaults.standard.set(followsMailSelection, forKey: Self.followsMailSelectionKey)
+            guard oldValue != followsMailSelection else { return }
+            if followsMailSelection {
+                lastMailSelectionID = nil
+                followSuppressed = false
+                pollMailSelection()
+            } else {
+                mailFollowStatus = .off
+            }
+        }
+    }
+
+    static let followsMailSelectionKey = "inspector.followsMailSelection"
 
     /// 已捕获的邮件（会话里来回好几封都会在这里，最新在前）。
     @Published private(set) var capturedMessages: [StoredMessage] = []
@@ -87,6 +120,11 @@ final class InspectorModel: ObservableObject {
     /// Mail 对同一封会回调两次（先空壳、后完整），我们需要悄悄换上完整那份，
     /// 否则内嵌图片会一直是空白。
     private var currentInternetMessageID: String?
+    /// 上一次从 Mail 读到的选中项，用来判断"选择变了没有"。
+    private var lastMailSelectionID: String?
+    /// 用户手动选过邮件之后，先别让自动跟随把他拉回去 ——
+    /// 直到 Mail 那边的选中项真的变了，才恢复跟随。
+    private var followSuppressed = false
     /// messages 目录的上次修改时间，避免每次轮询都全量重读元数据。
     private var lastMessagesDirectoryStamp: Date?
 
@@ -118,7 +156,13 @@ final class InspectorModel: ObservableObject {
     }
 
     /// 载入指定 ID 的邮件。
-    func load(messageID: String) async {
+    ///
+    /// - Parameter manual: 是不是用户手动选的（下拉里点、点横幅、拖文件）。
+    ///   手动选过之后要**先别让自动跟随把人拉回去** ——
+    ///   否则你刚点开另一封，下一秒就被 Mail 的选中项拽回来。
+    func load(messageID: String, manual: Bool = true) async {
+        if manual { followSuppressed = true }
+
         let stored = capturedMessages.first { $0.id == messageID }
             ?? MessageStore.all().first { $0.id == messageID }
 
@@ -163,6 +207,62 @@ final class InspectorModel: ObservableObject {
         // 立刻记下 nonce，避免随后的轮询把同一个请求再处理一遍
         markCurrentRequestHandled()
         Task { await load(messageID: id) }
+    }
+
+    // MARK: - 跟随 Mail 的选中项
+
+    /// 查询 Mail 当前选中的是哪一封，需要的话切过去。
+    ///
+    /// 用 AppleScript 主动查，而不是靠被动信号：实测被动解码事件里
+    /// 59 个相邻间隔有 38 个小于 1.5 秒（滚动列表/预取/打开会话时的批量解码），
+    /// 跟"用户打开了哪一封"无关。
+    func pollMailSelection() {
+        guard followsMailSelection else { return }
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let selection = try await MailSelectionMonitor.shared.currentSelection()
+
+                // Mail 的选中项变了 → 解除之前的手动抑制
+                if selection.internetMessageID != self.lastMailSelectionID {
+                    self.lastMailSelectionID = selection.internetMessageID
+                    self.followSuppressed = false
+                }
+
+                guard !self.followSuppressed else {
+                    self.mailFollowStatus = .following
+                    return
+                }
+
+                guard let message = MessageStore.message(
+                    matchingInternetMessageID: selection.internetMessageID
+                ) else {
+                    // Mail 选中了，但那封邮件扩展还没收到（刚点开、还在解码）
+                    self.mailFollowStatus = .waiting("Mail 选中的邮件还没同步过来…")
+                    return
+                }
+
+                self.mailFollowStatus = .following
+                guard message.id != self.currentMessage?.id else { return }
+                await self.load(messageID: message.id, manual: false)
+            } catch let error as MailSelectionError {
+                switch error {
+                case .automationDenied:
+                    self.mailFollowStatus = .permissionDenied
+                default:
+                    self.mailFollowStatus = error.isTransient ? .waiting(error.description) : .failed(error.description)
+                }
+            } catch {
+                self.mailFollowStatus = .failed(String(describing: error))
+            }
+        }
+    }
+
+    /// 打开「系统设置 → 隐私与安全性 → 自动化」，引导用户授权。
+    func openAutomationSettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")
+        if let url { NSWorkspace.shared.open(url) }
     }
 
     /// 轮询 Mail 那边的动静。做两件事：

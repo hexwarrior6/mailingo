@@ -79,6 +79,16 @@ public enum MIMEHeaders {
         return headers
     }
 
+    /// 归一化 Message-ID：去掉尖括号与首尾空白。
+    ///
+    /// 比较 Message-ID 时必须先过一遍：Mail 的 AppleScript 返回 `<xxx@yyy>`，
+    /// 而我们存的是原始头部值，两边格式未必一致。
+    public static func normalizeMessageID(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "<>"))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// 取头部值。头部名大小写不敏感（解析时已统一小写，这里再兜一层）。
     public static func value(_ name: String, in headers: [String: String]) -> String? {
         headers[name.lowercased()]

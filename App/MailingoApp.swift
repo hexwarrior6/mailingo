@@ -38,10 +38,10 @@ struct RootView: View {
 
     @AppStorage(DeveloperMode.storageKey) private var isDeveloperMode = false
 
-    /// 兜底轮询：容器 App 可能已经在运行，这时 LaunchServices 打开 URL
-    /// 未必能把请求送进来；appex 又是沙盒进程，打开 URL 有失败的可能。
-    /// 每 1.5 秒看一眼请求文件，代价只有一次 stat。
-    private let pendingRequestTimer = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
+    /// 统一轮询：
+    /// - 待处理请求文件（URL scheme 的兜底，代价只有一次 stat）
+    /// - Mail 当前选中的是哪一封（只在「跟随 Mail」打开时才真的去查）
+    private let pollTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
     var body: some View {
         pages
@@ -52,8 +52,9 @@ struct RootView: View {
             .onOpenURL { url in
                 model.handle(url: url)
             }
-            .onReceive(pendingRequestTimer) { _ in
+            .onReceive(pollTimer) { _ in
                 model.pollPendingRequest()
+                model.pollMailSelection()
             }
             // 关掉开发者模式时，如果当前选的是调试用引擎，要切回正式引擎重翻一次
             .onChange(of: isDeveloperMode) { _, _ in

@@ -157,6 +157,17 @@ public enum MessageStore {
             .sorted { $0.capturedAt > $1.capturedAt }
     }
 
+    /// 按 Message-ID 找一封邮件（比较前会归一化尖括号）。
+    ///
+    /// 用途：Mail 那边告诉我们"当前选中的是 <xxx@yyy>"，用它对上号。
+    public static func message(matchingInternetMessageID raw: String) -> StoredMessage? {
+        let target = MIMEHeaders.normalizeMessageID(raw)
+        guard !target.isEmpty else { return nil }
+        return all().first {
+            MIMEHeaders.normalizeMessageID($0.internetMessageID ?? "") == target
+        }
+    }
+
     /// 同一封邮件里，哪一份最完整（字节数最大）。
     ///
     /// 界面用它来判断"我现在显示的这份是不是空壳，要不要换成完整的"。
