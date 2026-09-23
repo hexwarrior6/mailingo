@@ -1,3 +1,4 @@
+XCODEGEN_VERSION := 2.46.0
 XCODEGEN := .tools/xcodegen/bin/xcodegen
 DERIVED  := .build/DerivedData
 CONFIG   := Debug
@@ -7,9 +8,10 @@ LOGDIR   := $(HOME)/Library/Containers/com.zhuyuhao.Mailingo.MailExtension/Data/
 LEGACY   := $(HOME)/Library/Logs/Mailingo
 LOG      := $(LOGDIR)/probe.log
 
-.PHONY: help gen build run register status log stream diagnose clean reset-log install-app verify-appex refresh-plugins
+.PHONY: help bootstrap gen build run register status log stream diagnose clean reset-log install-app verify-appex refresh-plugins
 
 help:
+	@echo "make bootstrap  下载 XcodeGen 到 .tools/（无需 sudo，固定版本；克隆后先跑这个）"
 	@echo "make gen        生成 Mailingo.xcodeproj（XcodeGen）"
 	@echo "make build      编译（含 appex 嵌入）"
 	@echo "make run        编译并启动容器 App（探针看板）"
@@ -22,7 +24,28 @@ help:
 	@echo "make refresh-plugins 重新注册扩展并列出 Mail 扩展"
 	@echo "make reset-log  清空探针日志与落盘的 MIME"
 
+# 为什么要有这个：XcodeGen 是我们唯一的构建工具依赖，但 .tools/ 被 .gitignore 排除
+# （它是下载来的工具，不该入库）。没有 bootstrap 的话，别人克隆下来 `make gen` 会直接
+# 失败，构建前提就成了口头知识。固定版本号，保证可复现。
+bootstrap:
+	@if [ -x "$(XCODEGEN)" ]; then \
+		echo "✓ XcodeGen 已就绪：$$($(XCODEGEN) --version)"; \
+	else \
+		echo "== 下载 XcodeGen $(XCODEGEN_VERSION) 到 .tools/（无需 sudo）=="; \
+		mkdir -p .tools; \
+		curl -fsSL --retry 3 -o .tools/xcodegen.zip \
+			"https://github.com/yonaskolb/XcodeGen/releases/download/$(XCODEGEN_VERSION)/xcodegen.zip" \
+			|| { echo "❌ 下载失败。可手动从 https://github.com/yonaskolb/XcodeGen/releases 取得 xcodegen.zip 并解压到 .tools/"; exit 1; }; \
+		unzip -oq .tools/xcodegen.zip -d .tools; \
+		rm -f .tools/xcodegen.zip; \
+		xattr -dr com.apple.quarantine .tools/xcodegen 2>/dev/null || true; \
+		chmod +x "$(XCODEGEN)"; \
+		echo "✓ 完成：$$($(XCODEGEN) --version)"; \
+	fi
+
 gen:
+	@test -x "$(XCODEGEN)" || { \
+		echo "❌ 缺少 XcodeGen（$(XCODEGEN)）。先跑：make bootstrap"; exit 1; }
 	$(XCODEGEN) generate --spec project.yml --project .
 
 build: gen
