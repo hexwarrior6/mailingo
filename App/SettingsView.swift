@@ -87,6 +87,18 @@ struct SettingsView: View {
                  : "需要先在主窗口打开「跟随 Mail」—— 检测信号来自它的轮询。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            // 只在上面那个开关打开时才出现 —— 关了它，这一项没有意义
+            if model.closesWithMail {
+                Toggle("立即关闭，不等确认", isOn: $model.closesWithMailImmediately)
+                    .disabled(!model.followsMailSelection)
+
+                Text(model.closesWithMailImmediately
+                     ? "识别到 Mail 的阅读窗口没了就立刻关。万一 Mail 一时报不出窗口，Mailingo 会当场消失。"
+                     : "默认会连续确认约 1.5 秒，避免 Mail 一瞬间报不出窗口就把 Mailingo 收掉。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         } header: {
             Text("跟 Mail 联动")
         }

@@ -105,6 +105,7 @@ final class InspectorModel: ObservableObject {
 
     static let followsMailSelectionKey = "inspector.followsMailSelection"
     static let closesWithMailKey = "inspector.closesWithMail"
+    static let closesWithMailImmediatelyKey = "inspector.closesWithMailImmediately"
 
     /// 已捕获的邮件（会话里来回好几封都会在这里，最新在前）。
     @Published private(set) var capturedMessages: [StoredMessage] = []
@@ -148,6 +149,25 @@ final class InspectorModel: ObservableObject {
         }
     }
 
+    /// 识别到 Mail 阅读窗口消失时**立即**关窗，不等去抖确认。
+    ///
+    /// 默认**关**：默认行为要连续几次轮询确认，避免 Mail 一瞬间报不出阅读
+    /// 窗口就把我们的窗口收掉。打开后识别到就关 —— 代价是万一 Mail 抖一下，
+    /// 窗口会当场消失。
+    ///
+    /// 只影响"确认几次"，**不影响**「必须曾经见过阅读窗口」那道闸 ——
+    /// 那道是正确性而不是延迟，拿掉会误伤"从 Finder 打开翻旧邮件"的场景。
+    @Published var closesWithMailImmediately: Bool =
+        UserDefaults.standard.bool(forKey: InspectorModel.closesWithMailImmediatelyKey) {
+        didSet {
+            UserDefaults.standard.set(
+                closesWithMailImmediately,
+                forKey: Self.closesWithMailImmediatelyKey
+            )
+            noViewerStreak = 0
+        }
+    }
+
     /// 这次会话里**见到过** Mail 的阅读窗口。
     ///
     /// 这是自动关窗的前置条件，缺了它会误伤：从 Finder 打开 Mailingo 翻看
@@ -160,8 +180,15 @@ final class InspectorModel: ObservableObject {
     private var noViewerStreak = 0
 
     /// 连续多少次才认定"Mail 的阅读窗口真的关了"。
-    /// 轮询间隔 0.5 秒，所以 3 次 ≈ 1.5 秒。
-    private static let noViewerStreakThreshold = 3
+    ///
+    /// 默认 3 次：轮询间隔 0.5 秒，所以约 1.5 秒确认一次，防止抖动误关。
+    /// 开了「立即关闭」就降到 1 次 —— 识别到就关。剩下的延迟只有轮询间隔
+    /// 本身（最多 0.5 秒），因为信号只能靠轮询拿到。
+    private static let defaultNoViewerStreakThreshold = 3
+
+    private var noViewerStreakThreshold: Int {
+        closesWithMailImmediately ? 1 : Self.defaultNoViewerStreakThreshold
+    }
 
     /// 当前正在跑的「问 Mail 选中了哪一封」的查询。
     /// 用来在发起新查询前取消旧的，避免 AppleScript 在串行队列上堆成一串。
@@ -530,11 +557,12 @@ final class InspectorModel: ObservableObject {
         guard closesWithMail, hasSeenMailViewer else { return }
 
         noViewerStreak += 1
-        guard noViewerStreak >= Self.noViewerStreakThreshold else { return }
+        let threshold = noViewerStreakThreshold
+        guard noViewerStreak >= threshold else { return }
 
         noViewerStreak = 0
         hasSeenMailViewer = false   // 关掉之后要重新"见过"才会再触发
-        trace.notice("Mail 的阅读窗口关掉了（连续 \(Self.noViewerStreakThreshold) 次确认）→ 关闭本窗口")
+        trace.notice("Mail 的阅读窗口关掉了（确认 \(threshold) 次）→ 关闭本窗口")
 
         // 窗口是 SwiftUI 的 Window 场景在管，AppKit 这边关不了它 ——
         // 发通知让 RootView 用 `dismiss()` 收掉（然后 App 会因为
