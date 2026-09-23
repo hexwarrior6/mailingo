@@ -181,7 +181,24 @@ public final class AppleTranslationSessionBroker: ObservableObject {
     func sessionIsReady(_ session: TranslationSession) async {
         guard active == nil, let job = waiting.first else { return }
 
+        // ⚠️ removeFirst 必须紧贴上面的 guard，**中间不能插入任何 await**。
+        //
+        // 旧版本把它放在 `try await job.body(session)` 之后。当超时还覆盖整个作业时，
+        // 长翻译会在 body 跑到一半被 abandon 出队，body 结束后这行就对空集合
+        // removeFirst —— 直接崩溃。实测崩溃栈：
+        //     RangeReplaceableCollection.removeFirst()
+        //     AppleTranslationSessionBroker.sessionIsReady(_:)
+        //
+        // 现在超时只覆盖"等 session"，加上这里紧贴 guard，双重保证不会再出现。
         waiting.removeFirst()
+
+        // 极端竞态下作业可能刚被放弃（超时与 session 到达同时发生）。放它走。
+        guard !job.isFinished else {
+            active = nil
+            if !waiting.isEmpty { triggerNextSession() }
+            return
+        }
+
         active = job
 
         logger.notice("session 到达（作业 #\(job.submitOrder)），仍在等待 \(self.waiting.count) 个")

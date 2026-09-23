@@ -14,6 +14,9 @@ struct EmailInspectionView: View {
     @StateObject private var model = InspectorModel()
     @State private var isImporting = false
     @State private var didRunStartupDiagnostics = false
+    /// 底部片段面板是否展开。持久化 —— 用户折叠一次就是不想看它，
+    /// 下次启动不该又弹回来。
+    @AppStorage("inspector.showSegments") private var isSegmentsVisible = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -128,25 +131,44 @@ struct EmailInspectionView: View {
             summaryBar(inspection)
             Divider()
 
-            HSplitView {
-                PreviewPane(
-                    title: "原文",
-                    subtitle: "\(inspection.originalHTML.count) 字符",
-                    html: inspection.originalHTML,
-                    accent: .secondary
-                )
-                PreviewPane(
-                    title: model.engineChoice.isRealTranslation ? "中文译文" : "切片后",
-                    subtitle: "\(inspection.segments.count) 段",
-                    html: inspection.splicedHTML,
-                    accent: inspection.fidelity.nonTextBytesIdentical ? .green : .red
-                )
+            // VSplitView：中间那条分隔线可以**上下拖拽**，用来调整
+            // 「原文 / 译文」预览区的高度 —— 长邮件里这是最需要能调的一块。
+            // 折叠时把表格整个撤掉，预览区自然占满剩余空间。
+            if isSegmentsVisible {
+                VSplitView {
+                    previews(inspection)
+                        .frame(minHeight: 160)
+                    segmentsTable(inspection)
+                        .frame(minHeight: 96)
+                }
+            } else {
+                previews(inspection)
             }
-            .padding(12)
 
             Divider()
-            segmentsSection(inspection)
+            // 折叠条固定在窗口底部：无论展开还是折叠都停在同一位置，
+            // 位置稳定，不会因为展开/收起而跳来跳去。
+            segmentsToggleBar(count: inspection.segments.count)
         }
+    }
+
+    /// 左右并排的原文 / 译文。两者之间的分隔线可拖拽调整**宽度**。
+    private func previews(_ inspection: EmailInspection) -> some View {
+        HSplitView {
+            PreviewPane(
+                title: "原文",
+                subtitle: "\(inspection.originalHTML.count) 字符",
+                html: inspection.originalHTML,
+                accent: .secondary
+            )
+            PreviewPane(
+                title: model.engineChoice.isRealTranslation ? "中文译文" : "切片后",
+                subtitle: "\(inspection.segments.count) 段",
+                html: inspection.splicedHTML,
+                accent: inspection.fidelity.nonTextBytesIdentical ? .green : .red
+            )
+        }
+        .padding(12)
     }
 
     private func summaryBar(_ inspection: EmailInspection) -> some View {
@@ -189,43 +211,70 @@ struct EmailInspectionView: View {
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
-    private func segmentsSection(_ inspection: EmailInspection) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("提取出的片段").font(.system(size: 12, weight: .semibold))
-                Text("（区间之外一个字节都不碰）")
-                    .font(.caption).foregroundStyle(.tertiary)
-                Spacer()
+    private func segmentsTable(_ inspection: EmailInspection) -> some View {
+        Table(inspection.segments) {
+            TableColumn("#") { segment in
+                Text("\(segment.id)").monospacedDigit()
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .width(36)
 
-            Table(inspection.segments) {
-                TableColumn("#") { segment in
-                    Text("\(segment.id)").monospacedDigit()
-                }
-                .width(36)
+            TableColumn("类型") { segment in
+                Text(segment.kind.rawValue)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            .width(80)
 
-                TableColumn("类型") { segment in
-                    Text(segment.kind.rawValue)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-                .width(80)
+            TableColumn("上下文") { segment in
+                Text(segment.ancestorTags.suffix(3).joined(separator: " › "))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+            .width(140)
 
-                TableColumn("上下文") { segment in
-                    Text(segment.ancestorTags.suffix(3).joined(separator: " › "))
-                        .font(.system(size: 10, design: .monospaced))
+            TableColumn("原文") { segment in
+                Text(segment.sourceText).lineLimit(2).textSelection(.enabled)
+            }
+        }
+    }
+
+    /// 底部的折叠条。整条都可点，不只是一个箭头 —— 点击区域大得多。
+    private func segmentsToggleBar(count: Int) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                isSegmentsVisible.toggle()
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: isSegmentsVisible ? "chevron.down" : "chevron.up")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
+
+                Text("提取出的片段")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("\(count)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+
+                if isSegmentsVisible {
+                    Text("（这些是送去翻译的文本，区间之外一个字节都不碰）")
+                        .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
-                .width(140)
 
-                TableColumn("原文") { segment in
-                    Text(segment.sourceText).lineLimit(2).textSelection(.enabled)
-                }
+                Spacer()
+
+                Text(isSegmentsVisible ? "点击隐藏" : "点击展开")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
-            .frame(minHeight: 130)
+            .contentShape(Rectangle())
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
         }
+        .buttonStyle(.plain)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .help(isSegmentsVisible ? "隐藏片段列表，把空间让给预览" : "展开片段列表")
     }
 
     // MARK: - 小组件

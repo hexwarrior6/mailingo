@@ -6,8 +6,11 @@ struct MailingoApp: App {
     var body: some Scene {
         WindowGroup("Mailingo") {
             RootView()
-                .frame(minWidth: 1000, minHeight: 640)
+                // 最小尺寸放低一些，让窗口能真的缩小；内部各区域靠
+                // VSplitView / HSplitView 自适应，不需要靠"大最小尺寸"兜底。
+                .frame(minWidth: 820, minHeight: 520)
         }
+        .defaultSize(width: 1240, height: 840)
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {}
