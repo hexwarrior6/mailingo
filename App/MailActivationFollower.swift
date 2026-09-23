@@ -126,11 +126,19 @@ struct WindowAccessor: NSViewRepresentable {
         let view = NSView(frame: .zero)
         // `makeNSView` 返回时视图还没进窗口树，`window` 仍是 nil，
         // 所以推到下一个 runloop 再取一次。
-        DispatchQueue.main.async { MailActivationFollower.shared.mainWindow = view.window }
+        DispatchQueue.main.async { Self.handOver(view.window) }
         return view
     }
 
     func updateNSView(_ view: NSView, context: Context) {
-        MailActivationFollower.shared.mainWindow = view.window
+        Self.handOver(view.window)
+    }
+
+    private static func handOver(_ window: NSWindow?) {
+        guard let window else { return }
+        MailActivationFollower.shared.mainWindow = window
+        // 窗口摆放也要这个句柄，而且它得**尽早**拿到 ——
+        // 加入别的 App 全屏空间这件事，等窗口显示出来再设就晚了。
+        WindowTiler.attach(window)
     }
 }
