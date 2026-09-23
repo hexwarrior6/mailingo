@@ -80,13 +80,25 @@ struct SettingsView: View {
     @AppStorage(MailActivationFollower.enabledKey)
     private var followsMailActivation = false
 
+    @AppStorage(MailActivationFollower.hidesWhenMailHidesKey)
+    private var hidesWhenMailGoesBack = false
+
     private var mailLinkageSection: some View {
         Section {
             Toggle("Mail 到前台时，把 Mailingo 的窗口也提到最前", isOn: $followsMailActivation)
-            Text("只提窗、**不抢键盘焦点** —— Mail 仍是活动 App，照常能打字滚动。"
-                 + "切到别的 App 时窗口不会消失：分屏下两个窗口本来就一起进退。")
+            Text("只提窗、**不抢键盘焦点** —— Mail 仍是活动 App，照常能打字滚动。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            if followsMailActivation {
+                Toggle("Mail 退到后台时，把 Mailingo 的窗口也收起来",
+                       isOn: $hidesWhenMailGoesBack)
+                Text("⚠️ 系统全屏分屏（两个 App 并排占满一屏）下会把分屏拆散 —— "
+                     + "那种情况下两个窗口本来就是同一个空间一起进退，不需要这一项。"
+                     + "普通窗口并排则没这个问题。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             Toggle("Mail 关掉阅读窗口时，同时关闭 Mailingo", isOn: $model.closesWithMail)
                 .disabled(!model.followsMailSelection)

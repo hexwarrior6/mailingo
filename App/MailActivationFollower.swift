@@ -16,16 +16,17 @@ import os
 /// 代价：菜单栏仍然属于 Mail。这是刻意的 —— 想要菜单栏切到 Mailingo，
 /// 就必须真的激活自己，而那样 Mail 就没法用了。
 ///
-/// ## 为什么没有"Mail 退到后台，我们也退"
+/// ## "Mail 退到后台，我们也退"为什么是**单独一个**开关
 ///
-/// 因为**我们从来就没占过前台那个位置** —— 不抢活动状态，"我们在后台"
-/// 就是一直成立的事实，不需要任何代码去实现。
+/// 提窗是安全的：只抬层级，不改活动 App。而"退到后台"必须真的把窗口藏起来
+/// （`NSApp.hide`），代价是实打实的：
 ///
-/// 而如果真去 `NSApp.hide()` 把窗口藏起来，会有两个坏处：
+/// 1. **macOS 全屏分屏（Split View）下会拆散分屏** —— 两个 App 本来是同一个
+///    空间一起进退，单独把我们的窗口藏掉会让那一半变空。普通窗口并排则没这问题。
+/// 2. 用户切到别的 App 查个资料，回来发现译文窗口不见了。跟随功能会把它放回来，
+///    但那一下仍然是"东西不见了"。
 ///
-/// 1. **分屏（Split View）下会留一个空洞。** 两个窗口并排时"Mail 退到后台"
-///    是**整个空间一起退**，本来就同步；单独把我们的窗口藏掉反而会拆散分屏。
-/// 2. 用户切到别的 App 查个资料，回来发现译文窗口不见了 —— 那是丢状态，不是跟随。
+/// 所以两个方向拆成两个开关，默认都关，由用户自己权衡。
 ///
 /// ## 信号来源
 ///
@@ -35,9 +36,13 @@ final class MailActivationFollower {
 
     static let shared = MailActivationFollower()
 
-    /// 开关。始终挂着观察者、在回调里读这个标志 —— 通知频率极低（切 App 才有），
+    /// 「Mail 到前台 → 我们提窗」的开关。
+    /// 始终挂着观察者、在回调里读这个标志 —— 通知频率极低（切 App 才有），
     /// 没必要为它维护启停状态。设置界面直接写同一个 key。
     static let enabledKey = "followMailActivation"
+
+    /// 「Mail 退到后台 → 我们藏起来」的开关。单独一个，理由见类注释。
+    static let hidesWhenMailHidesKey = "hideWhenMailGoesBack"
 
     private static let mailBundleID = "com.apple.mail"
 
@@ -50,8 +55,12 @@ final class MailActivationFollower {
     /// 里的 `WindowAccessor` 把真正的宿主窗口交进来。
     weak var mainWindow: NSWindow?
 
-    private var isEnabled: Bool {
+    private var raisesWhenMailAppears: Bool {
         UserDefaults.standard.bool(forKey: Self.enabledKey)
+    }
+
+    private var hidesWhenMailGoesBack: Bool {
+        UserDefaults.standard.bool(forKey: Self.hidesWhenMailHidesKey)
     }
 
     private init() {}
@@ -69,16 +78,58 @@ final class MailActivationFollower {
             guard app?.bundleIdentifier == Self.mailBundleID else { return }
             self.mailCameForward()
         })
+
+        observers.append(NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didDeactivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self else { return }
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            guard app?.bundleIdentifier == Self.mailBundleID else { return }
+            self.mailWentBack()
+        })
     }
 
     private func mailCameForward() {
-        guard isEnabled, let window = mainWindow else { return }
+        guard raisesWhenMailAppears, let window = mainWindow else { return }
 
-        // 窗口可能因为 Mail 之前退到后台而被系统隐没，先放出来再提到最前。
+        // 窗口可能因为 Mail 之前退到后台而被我们藏起来了，先放出来再提到最前。
         // 注意是 `unhideWithoutActivation` —— 同样不能激活自己。
         NSApp.unhideWithoutActivation()
         window.orderFrontRegardless()
-        logger.notice("Mail 到前台 → 把窗口提到最前（不抢键盘焦点）")
+        logger.notice("""
+            跟随：Mail 到前台 → 提窗 \
+            前置App=\(Self.frontmostID) 本App是否活动=\(NSApp.isActive)
+            """)
+    }
+
+    /// Mail 退到后台。
+    ///
+    /// 只在**单独**开了"也藏起来"时才动。默认什么都不做 —— 我们本来就没占
+    /// 前台那个位置，"我们在后台"一直成立，不需要代码去实现。
+    private func mailWentBack() {
+        guard hidesWhenMailGoesBack else { return }
+
+        // ★ 这道判断不能少：Mail 失活**可能是我们自己造成的** —— 用户点了我们的
+        //   窗口，于是我们变成活动 App、Mail 失活。这时如果照做把自己藏起来，
+        //   用户正在操作的窗口会当场消失。
+        let frontmost = Self.frontmostID
+        guard frontmost != Bundle.main.bundleIdentifier else {
+            logger.notice("跟随：Mail 失活但前台是我们自己（用户点了我们的窗口）→ 不藏")
+            return
+        }
+
+        NSApp.hide(nil)
+        logger.notice("""
+            跟随：Mail 退到后台 → 藏起窗口 \
+            前置App=\(frontmost) 本App是否活动=\(NSApp.isActive)
+            """)
+    }
+
+    /// 当前前台 App 的 bundle id，只用于日志。
+    private static var frontmostID: String {
+        NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "<无>"
     }
 }
 
