@@ -120,6 +120,23 @@ final class InspectorModel: ObservableObject {
 
     private var analysis: EmailAnalysis?
     private var translationTask: Task<Void, Never>?
+
+    /// 当前正在跑的载入任务。新的一次载入会先取消它 ——
+    /// 快速切邮件时要**直接跳到最后一封**，不能把中间每一封都加载完。
+    /// 详见 `load(messageID:manual:ignoringCache:)`。
+    private var loadTask: Task<Void, Never>?
+
+    /// 载入的代次。每次载入换一个新值；每个 await 回来都要对一次，
+    /// 对不上说明自己已经被取代了，什么都不许写。
+    ///
+    /// 为什么光靠 `cancel()` 不够：取消是协作式的，旧任务可能正卡在某个 await
+    /// 上，取消后还要过一会儿才真的退出。中间这段时间足够它把旧邮件的内容
+    /// 写进 `inspection`，把用户刚切过去的新邮件盖掉。
+    private var loadToken = UUID()
+
+    /// 当前正在跑的「问 Mail 选中了哪一封」的查询。
+    /// 用来在发起新查询前取消旧的，避免 AppleScript 在串行队列上堆成一串。
+    private var selectionQueryTask: Task<MailSelection, Error>?
     /// 每次翻译运行发一个令牌。取消不一定能立刻终止正在 await 的调用，
     /// 所以结果回来时要确认"我还是当前那一次"，否则旧邮件的译文会覆盖新邮件。
     private var runToken = UUID()
@@ -181,41 +198,104 @@ final class InspectorModel: ObservableObject {
 
     /// 载入指定 ID 的邮件。
     ///
+    /// ## 快速切邮件时为什么要「取消上一个」
+    ///
+    /// 在 Mail 左边点得快的时候，右边必须**直接跳到最后一封**，而不是把中间
+    /// 每一封都加载完再跟上。这里用两道闸：
+    ///
+    /// 1. **取消**上一个载入任务（`loadTask`）。解析是纯 CPU 活，取消掉就不再
+    ///    白烧 CPU —— 配合 `EmailInspector.analyze` 里的 `checkCancellation`。
+    /// 2. **代次**（`loadToken`）。取消是协作式的：旧任务可能正卡在某个 await 上，
+    ///    取消后还要过一会儿才真的退出。所以每个 await 回来都要对一次代次，
+    ///    对不上就**什么都不写**，绝不让旧邮件的内容盖掉新邮件的。
+    ///
     /// - Parameter manual: 是不是用户手动选的（下拉里点、点横幅、拖文件）。
     ///   手动选过之后要**先别让自动跟随把人拉回去** ——
     ///   否则你刚点开另一封，下一秒就被 Mail 的选中项拽回来。
     /// - Parameter ignoringCache: 见 `retranslate()`。
     func load(messageID: String, manual: Bool = true, ignoringCache: Bool = false) async {
+        // 先把上一个载入掐断。注意 `cancel()` 只是"请求取消"，旧任务未必立刻停，
+        // 所以下面还要靠代次兜底。
+        loadTask?.cancel()
+
+        // 连它派生出来的翻译一起掐。
+        //
+        // 为什么不能只靠 `restartTranslation()` 去掐：如果这次载入是**在解析
+        // 中途**被取消的，它根本没机会走到 `restartTranslation()`，上一封的翻译
+        // 就会继续跑，甚至在新邮件已经显示之后才把旧译文写回 `inspection`。
+        // 换掉 `runToken` 是把那条路彻底堵死 —— 在途的旧译文回来时对不上号，
+        // 只能被丢弃（但它的缓存写入仍然有效，不浪费）。
+        translationTask?.cancel()
+        runToken = UUID()
+
+        let token = UUID()
+        loadToken = token
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performLoad(
+                messageID: messageID,
+                manual: manual,
+                ignoringCache: ignoringCache,
+                token: token
+            )
+        }
+        loadTask = task
+        await task.value
+    }
+
+    /// 真正干活的那一半。所有 await 回来后都要重新确认自己还是"当前那一次"。
+    private func performLoad(
+        messageID: String,
+        manual: Bool,
+        ignoringCache: Bool,
+        token: UUID
+    ) async {
         if manual { followSuppressed = true }
 
         let stored = capturedMessages.first { $0.id == messageID }
             ?? MessageStore.all().first { $0.id == messageID }
 
         guard let stored else {
+            guard loadToken == token else { return }
             state = .failed("找不到邮件 \(messageID)，可能已经被清理掉了。")
             return
         }
         guard let raw = MessageStore.rawMessage(id: messageID) else {
+            guard loadToken == token else { return }
             state = .failed("邮件 \(messageID) 的原始内容读不出来。")
             return
         }
 
+        // 已经被更新的一次载入取代 → 连 currentMessage 都不要动
+        guard loadToken == token else { return }
+
         currentMessage = stored
         currentInternetMessageID = stored.internetMessageID
         do {
-            try await analyze(data: raw, ignoringCache: ignoringCache)
+            try await analyze(data: raw, ignoringCache: ignoringCache, token: token)
+        } catch is CancellationError {
+            // 被取代了，静默丢弃 —— 这不是错误，是预期行为
         } catch {
+            guard loadToken == token else { return }
             state = .failed("解析失败：\(error.localizedDescription)")
         }
     }
 
     /// 用户从「打开 .eml…」选的文件。
     func load(fileURL: URL) async {
+        loadTask?.cancel()
+        let token = UUID()
+        loadToken = token
+
         currentMessage = nil
         currentInternetMessageID = nil
         do {
-            try await analyze(data: Data(contentsOf: fileURL), ignoringCache: true)
+            try await analyze(data: Data(contentsOf: fileURL), ignoringCache: true, token: token)
+        } catch is CancellationError {
+            // 被取代，静默丢弃
         } catch {
+            guard loadToken == token else { return }
             state = .failed("读取失败：\(error.localizedDescription)")
         }
     }
@@ -244,42 +324,80 @@ final class InspectorModel: ObservableObject {
     func pollMailSelection() {
         guard followsMailSelection else { return }
 
+        // **单飞**：上一次查询还没回来，这一拍就整个跳过。
+        //
+        // 为什么不"取消上一次、重新发一次"：查询本身读的就是**此刻**的选中项，
+        // 所以上一拍的结果不会过期，没有取消的必要。反过来，取消重发有个致命
+        // 后果 —— 当查询比轮询间隔还慢时（Mail 忙、或脚本挂着），每一拍都会把
+        // 上一拍取消掉，于是**永远拿不到任何结果**，跟随直接失效。
+        // 真正需要"取消上一个"的是**载入**，那个在 `load` 里做。
+        guard selectionQueryTask == nil else { return }
+
+        let query = Task { try await MailSelectionMonitor.shared.currentSelection() }
+        selectionQueryTask = query
+
         Task { [weak self] in
             guard let self else { return }
+
+            let outcome: Result<MailSelection, Error>
             do {
-                let selection = try await MailSelectionMonitor.shared.currentSelection()
-
-                // Mail 的选中项变了 → 解除之前的手动抑制
-                if selection.internetMessageID != self.lastMailSelectionID {
-                    self.lastMailSelectionID = selection.internetMessageID
-                    self.followSuppressed = false
-                }
-
-                guard !self.followSuppressed else {
-                    self.mailFollowStatus = .following
-                    return
-                }
-
-                guard let message = MessageStore.message(
-                    matchingInternetMessageID: selection.internetMessageID
-                ) else {
-                    // Mail 选中了，但那封邮件扩展还没收到（刚点开、还在解码）
-                    self.mailFollowStatus = .waiting("Mail 选中的邮件还没同步过来…")
-                    return
-                }
-
-                self.mailFollowStatus = .following
-                guard message.id != self.currentMessage?.id else { return }
-                await self.load(messageID: message.id, manual: false)
-            } catch let error as MailSelectionError {
-                switch error {
-                case .automationDenied:
-                    self.mailFollowStatus = .permissionDenied
-                default:
-                    self.mailFollowStatus = error.isTransient ? .waiting(error.description) : .failed(error.description)
-                }
+                outcome = .success(try await query.value)
             } catch {
-                self.mailFollowStatus = .failed(String(describing: error))
+                outcome = .failure(error)
+            }
+
+            // 查询一结束就放开这个槽 —— 后面的载入不该占着它，
+            // 否则载入期间的新选中项要等下一次轮询才被发现。
+            self.selectionQueryTask = nil
+
+            await self.followSelection(outcome)
+        }
+    }
+
+    /// 拿到一次查询结果之后该做什么。
+    private func followSelection(_ outcome: Result<MailSelection, Error>) async {
+        // 查询期间用户可能把「跟随 Mail」关掉了，那就别再切了
+        guard followsMailSelection else { return }
+
+        switch outcome {
+        case .success(let selection):
+            // Mail 的选中项变了 → 解除之前的手动抑制
+            if selection.internetMessageID != lastMailSelectionID {
+                lastMailSelectionID = selection.internetMessageID
+                followSuppressed = false
+            }
+
+            guard !followSuppressed else {
+                mailFollowStatus = .following
+                return
+            }
+
+            guard let message = MessageStore.message(
+                matchingInternetMessageID: selection.internetMessageID
+            ) else {
+                // Mail 选中了，但那封邮件扩展还没收到（刚点开、还在解码）
+                mailFollowStatus = .waiting("Mail 选中的邮件还没同步过来…")
+                return
+            }
+
+            mailFollowStatus = .following
+            guard message.id != currentMessage?.id else { return }
+            // 这一次 `load` 会自动取消上一次载入 —— 所以快速切邮件时
+            // 右边是"直接跳到最后一封"，不会把中间每一封都加载完。
+            await load(messageID: message.id, manual: false)
+
+        case .failure(let error):
+            guard let selectionError = error as? MailSelectionError else {
+                mailFollowStatus = .failed(String(describing: error))
+                return
+            }
+            switch selectionError {
+            case .automationDenied:
+                mailFollowStatus = .permissionDenied
+            default:
+                mailFollowStatus = selectionError.isTransient
+                    ? .waiting(selectionError.description)
+                    : .failed(selectionError.description)
             }
         }
     }
@@ -484,12 +602,16 @@ final class InspectorModel: ObservableObject {
 
     // MARK: - 内部
 
-    private func analyze(data: Data, ignoringCache: Bool = false) async throws {
+    private func analyze(data: Data, ignoringCache: Bool = false, token: UUID) async throws {
+        guard loadToken == token else { return }
         state = .loading
 
-        let analysis = try await Task.detached(priority: .userInitiated) {
-            try EmailInspector.analyze(rawMessage: data)
-        }.value
+        let analysis = try await analyzeOffMainThread(data)
+
+        // 解析是这段里最耗时的一步（MIME 解码 + HTML 分词）。回来之后必须
+        // 重新确认自己还是"当前那一次"，否则旧邮件会盖掉用户已经切过去的新邮件。
+        try Task.checkCancellation()
+        guard loadToken == token else { return }
 
         self.analysis = analysis
         self.sourceBytes = data.count
@@ -498,6 +620,26 @@ final class InspectorModel: ObservableObject {
         // 先用原样结果占位，再用引擎的结果替换
         self.inspection = EmailInspector.apply(translations: [:], to: analysis)
         restartTranslation(ignoringCache: ignoringCache)
+    }
+
+    /// 把解析挪到后台跑，并且**让它跟着当前任务一起被取消**。
+    ///
+    /// 用 `Task.detached` 是因为解析是纯 CPU 活，不该占主线程
+    /// （`InspectorModel` 是 `@MainActor`）。但 detached 的任务
+    /// **不会继承父任务的取消** —— 光 `await` 它的 `.value`，父任务被取消时
+    /// 它照样跑到底。所以这里显式把两者接起来：父任务一取消，
+    /// `onCancel` 就把 detached 任务也取消掉，`analyze` 里的
+    /// `checkCancellation` 随即抛出。这样快速切邮件时，旧的解析会真的停，
+    /// 而不是白烧一遍 CPU 再把结果丢掉。
+    private func analyzeOffMainThread(_ data: Data) async throws -> EmailAnalysis {
+        let task = Task.detached(priority: .userInitiated) {
+            try EmailInspector.analyze(rawMessage: data)
+        }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     private static func describe(_ error: Error) -> String {

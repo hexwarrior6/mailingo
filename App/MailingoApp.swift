@@ -46,7 +46,13 @@ struct RootView: View {
     /// 统一轮询：
     /// - 待处理请求文件（URL scheme 的兜底，代价只有一次 stat）
     /// - Mail 当前选中的是哪一封（只在「跟随 Mail」打开时才真的去查）
-    private let pollTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
+    ///
+    /// 间隔取 0.5 秒而不是 1 秒：它是"发现你切了邮件"的**最坏延迟**，
+    /// 而这一项占了跟随体验里的大头。查询本身很便宜（脚本编译一次、
+    /// 之后只执行），而且只有「跟随 Mail」打开时才会真的发出 Apple Event。
+    /// 前一次还没查完就发起的新查询会取代它，不会在 Mail 那边堆起来
+    /// （见 `InspectorModel.pollMailSelection`）。
+    private let pollTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
     var body: some View {
         pages

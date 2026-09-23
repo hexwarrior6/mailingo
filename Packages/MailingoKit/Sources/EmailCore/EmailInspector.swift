@@ -30,10 +30,21 @@ public struct EmailAnalysis: Sendable {
 public enum EmailInspector {
 
     /// 解码 MIME 并提取待翻译片段。纯同步、无副作用。
+    ///
+    /// ## 取消
+    ///
+    /// 调用方（App 的 `InspectorModel`）会在快速切邮件时取消这个任务：旧的
+    /// 那封没必要再解析完。这里放两处 `checkCancellation` —— 把最长的两步
+    /// （MIME 解码、HTML 分词）拆开，取消能在两步之间生效，省掉后面那一步。
+    ///
+    /// 之所以只放两处而不往分词器内部埋：这两个函数是纯函数，往里传"取消检查"
+    /// 会把并发概念漏进 M3 的核心逻辑里。两步之间的粒度已经够用 ——
+    /// 单封邮件这两步各自也就几十到几百毫秒。
     public static func analyze(
         rawMessage: Data,
         decoder: MIMEDecoding = RFC822MIMEDecoder()
     ) throws -> EmailAnalysis {
+        try Task.checkCancellation()
         let decoded = try decoder.decode(rawMessage)
 
         let (html, usedFallback): (String, Bool)
@@ -45,6 +56,7 @@ public enum EmailInspector {
             (html, usedFallback) = ("", false)
         }
 
+        try Task.checkCancellation()
         return EmailAnalysis(
             decoded: decoded,
             originalHTML: html,
