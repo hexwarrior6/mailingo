@@ -7,17 +7,21 @@ import os
 /// - Mail 被隐藏（右键 Dock 图标 → 隐藏，或 ⌘H）→ 我们也隐藏
 /// - Mail 重新显示 → 我们也显示，并把窗口提到最前
 ///
-/// ## 为什么**不**跟"Mail 被激活"
+/// ## "Mail 被激活"要分两种情况
 ///
-/// 一开始还挂了 `didActivateApplicationNotification`，想做到"Mail 一到前台我们
-/// 也到前台"。但那会撞上一个死结：**"你单击 Mail"和"Mail 到前台"是同一个事件**。
+/// **"你单击 Mail"和"Mail 到前台"是同一个事件**，所以只看激活是分不开的：
 ///
-/// 于是两窗口重叠、我们在上面时，你单击 Mail 想让它上来 —— 通知立刻触发，
-/// 我们又把位置抢回去。你点第二次才正常，因为那时 Mail 已经是活动 App，
-/// 不会再发激活通知。
+/// | 当时的状态 | 用户的意思 | 该怎么做 |
+/// |---|---|---|
+/// | 我们压在 Mail 上面，上面没别的东西 | 想用 Mail | 别抢，让它上来 |
+/// | 我们被浏览器之类压在下面 | 想两个一起看 | 提上来 |
 ///
-/// "单击 Mail"并不等于"Mail 被打开"。用户说的「打开 / 隐藏」是一对，
-/// 对应的是 **unhide / hide**，跟"激活"没有关系。所以只跟这两个。
+/// 上一版只做了"提上来"，于是两窗口重叠时你单击 Mail 反而被我们盖回去；
+/// 后来干脆不跟激活，结果"两个都被压在别的 App 后面时点 Mail"又提不起来了。
+///
+/// 现在用 `isCoveredByOtherApp` 区分：看我们上面有没有压着**别的 App**。
+/// 关键是**把 Mail 排除在外** —— Mail 一被激活，它的窗口必然排到我们前面，
+/// 算进去的话两种情况就永远分不开。
 ///
 /// ## 为什么用 `didHide` 而不是 `didDeactivate`
 ///
@@ -59,6 +63,14 @@ final class MailActivationFollower {
 
     private static let mailBundleID = "com.apple.mail"
 
+    /// Mail 是怎么"到前台"的。两者的处理不一样，见 `mailCameForward`。
+    private enum VisibilityReason {
+        /// 被激活 —— 可能是用户特意去点它
+        case activated
+        /// 从隐藏状态恢复 —— 我们自己跟着藏起来之后又一起回来
+        case unhidden
+    }
+
     private let logger = Logger(subsystem: "com.zhuyuhao.Mailingo", category: "follow")
     private var observers: [NSObjectProtocol] = []
 
@@ -79,15 +91,20 @@ final class MailActivationFollower {
         guard observers.isEmpty else { return }
         let center = NSWorkspace.shared.notificationCenter
 
-        // 显示：**只**跟"从隐藏状态恢复"，不跟"被激活"。理由见类注释。
-        observers.append(center.addObserver(
-            forName: NSWorkspace.didUnhideApplicationNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] note in
-            guard let self, Self.isMail(note) else { return }
-            self.mailBecameVisible()
-        })
+        // 显示：两种情况要分开对待，理由见 `mailCameForward`
+        for (name, reason) in [
+            (NSWorkspace.didActivateApplicationNotification, VisibilityReason.activated),
+            (NSWorkspace.didUnhideApplicationNotification, VisibilityReason.unhidden),
+        ] {
+            observers.append(center.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { [weak self] note in
+                guard let self, Self.isMail(note) else { return }
+                self.mailCameForward(reason: reason)
+            })
+        }
 
         // 隐藏：**只有**用户主动隐藏 Mail 才会触发（见类注释里的对比表）
         observers.append(center.addObserver(
@@ -107,15 +124,68 @@ final class MailActivationFollower {
         return app?.bundleIdentifier == mailBundleID
     }
 
-    private func mailBecameVisible() {
+    /// Mail 到前台了 —— 判断要不要把我们的窗口也提上来。
+    ///
+    /// ## 两种情况必须分开，否则一定会得罪一边
+    ///
+    /// | 当时的状态 | 用户的意思 | 该怎么做 |
+    /// |---|---|---|
+    /// | 我们压在 Mail 上面，上面没别的东西 | 想用 Mail | **别抢**，让它上来 |
+    /// | 我们被浏览器之类压在下面 | 想两个一起看 | 提上来 |
+    ///
+    /// 只看"Mail 被激活"是分不开这两者的 —— 而"你单击 Mail"和"Mail 到前台"
+    /// 本来就是同一个事件。上一版因此出现了"点一下 Mail 反而被我们盖回去"。
+    ///
+    /// 区分靠 `isCoveredByOtherApp`：看我们上面有没有压着**别的 App**。
+    private func mailCameForward(reason: VisibilityReason) {
         guard isEnabled, let window = mainWindow else { return }
+
+        // 「被激活」有可能是用户特意去点 Mail，这时不该抢；「从隐藏恢复」则是
+        // 我们自己跟着 Mail 一起藏起来之后又一起回来，必须放出来。
+        if reason == .activated, !Self.isCoveredByOtherApp(window) {
+            logger.notice("跟随：Mail 被激活，但我们上面没压着别的 App（只是想用 Mail）→ 不提窗")
+            return
+        }
 
         // 我们可能刚刚跟着 Mail 一起隐藏了，先放出来。
         // 注意是 `unhideWithoutActivation` —— 同样不能激活自己。
         NSApp.unhideWithoutActivation()
         if window.isMiniaturized { window.deminiaturize(nil) }
         window.orderFrontRegardless()
-        logger.notice("跟随：Mail 显示 → 我们也显示并提到最前（不抢键盘焦点）")
+        logger.notice("跟随：Mail \(reason == .unhidden ? "重新显示" : "被激活且我们被压住") → 提到最前")
+    }
+
+    /// 我们的窗口上面是否压着**别的 App**（Mail 除外）的窗口。
+    ///
+    /// 只看 `CGWindowList` 的**前后顺序**，不需要几何计算 —— 它按从前到后返回。
+    ///
+    /// 为什么必须把 **Mail 排除**：Mail 一被激活，它的窗口必然排到我们前面。
+    /// 把它也算成遮挡的话，两种情况就再也分不开了 —— 那正是上一版
+    /// "点了 Mail 我们却盖回去"的成因。
+    private static func isCoveredByOtherApp(_ window: NSWindow) -> Bool {
+        guard let list = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else { return false }
+
+        let ourPID = Int(ProcessInfo.processInfo.processIdentifier)
+        let ourNumber = window.windowNumber
+        let mailPID = NSRunningApplication
+            .runningApplications(withBundleIdentifier: mailBundleID).first
+            .map { Int($0.processIdentifier) }
+
+        for entry in list {
+            guard let number = entry[kCGWindowNumber as String] as? Int,
+                  let pid = entry[kCGWindowOwnerPID as String] as? Int else { continue }
+
+            if number == ourNumber { return false }   // 走到自己为止，上面的都看完了
+            if pid == ourPID { continue }             // 自己的窗口不算
+            if pid == mailPID { continue }            // Mail 不算（见上）
+            return true                               // 别的 App 压在我们上面
+        }
+
+        // 列表里没找到自己（比如在别的空间）→ 当作被挡住，该提窗
+        return true
     }
 
     private func mailWasHidden() {
