@@ -178,7 +178,11 @@ public enum TranslationDiagnostics {
         report.languagePairs = await probeLanguagePairs(source: detected)
         // 桥接自检放在最前面：语言包没装时它是唯一能验证 `.translationTask` 通路的手段
         if let apple = engine as? AppleTranslationEngine {
-            report.bridgeProbe = await apple.probeSession().summary
+            // 连续取 3 次：只取到第一次说明配置没有真正"变化"（典型 bug 特征）
+            let results = await apple.probeSessionRepeatedly(times: 3)
+            let succeeded = results.filter(\.succeeded).count
+            let detail = results.map(\.summary).joined(separator: "\n                 ")
+            report.bridgeProbe = "连续请求 3 次，成功 \(succeeded) 次\n                 " + detail
         }
 
         guard report.availability.canTranslate else {

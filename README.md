@@ -10,7 +10,7 @@
 
 ## 当前状态
 
-**M4（翻译引擎）已接通。** SwiftUI 桥接验证通过；端到端出中文还差一步：下载语言包。
+**M4（翻译引擎）已完成，端到端能出中文。** 下一步是 M5 正式渲染。
 
 | 阶段 | 状态 |
 |---|---|
@@ -18,7 +18,7 @@
 | 技术方案（`docs/IMPLEMENTATION_PLAN.md`） | ✅ 架构 C 已定 |
 | S0 探针：Mail 扩展能否作入口 + 数据源 | ✅ **四问全过**，见 [docs/S0-PROBE.md](docs/S0-PROBE.md) |
 | M3 EmailCore：MIME 解码 + HTML 字节切片管线 | ✅ 23 个单元测试 |
-| **M4 TranslationCore：Apple 翻译引擎** | ✅ 桥接已验证（`✅ 拿到 session 0.09 秒`）；⏳ 待下载语言包出真中文 |
+| **M4 TranslationCore：Apple 翻译引擎** | ✅ **端到端跑通**（连续取 session 3/3、实际译文见自检日志） |
 | M5 Renderer（WKWebView 正式渲染） | ⬜ 下一步 |
 | M6 吸附侧栏 | ⬜ |
 
@@ -46,7 +46,8 @@ S0 的关键结论：Mail 扩展（Message Security 扩展点）能在**阅读�
 
 **首次出中文需要下载语言包**：点工具栏的「**翻译自检**」，系统会弹下载确认。
 启动时的自动自检**故意不触发下载**，避免没经你同意就弹窗。
-自检报告写在 `~/Library/Logs/Mailingo/translation-selftest.log`。
+自检报告写在 `~/Library/Logs/Mailingo/translation-selftest.log`，含语言对可用性、
+语言检测结果、连续取 session 的成功率、以及实际译文抽样。
 
 ---
 
@@ -138,6 +139,15 @@ make diagnose      # 地面真相：os_log + appex 是否被拉起 + 注册情�
    plugin-server，在已是沙盒的构建环境里嵌套会失败。
 
 这三条的症状都是「扩展明明装上了，Mail 里就是没有」，排查时先看第 1、2 条。
+
+**第 4 条（翻译相关，症状最误导）**：`TranslationSession.Configuration` 必须
+**复用同一个实例反复 `invalidate()`**，不能每次新建。它的相等性包含 `version`，
+而 `invalidate()` 只在当前值上加一 —— 每次新建再 invalidate，每个配置的 version
+都是 1、彼此相等，SwiftUI 就认为"配置没变"，**不再触发 `.translationTask`**。
+
+表现是：**第一次翻译完全正常，之后每次都卡在「翻译中 0/N」，直到 30 秒超时报
+「等待翻译会话超时」**。看起来像翻译服务变慢，其实是根本没去要 session。
+`make test` 里有两条测试把这件事钉住了。
 
 ---
 

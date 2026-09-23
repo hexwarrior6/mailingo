@@ -30,7 +30,7 @@ public struct MarkerTranslationEngine: TranslationEngine {
         segments: [TranslationSegment],
         sourceLanguage: Locale.Language?,
         targetLanguage: Locale.Language,
-        progress: @Sendable (Int, Int) -> Void
+        progress: @escaping @Sendable (Int, Int) -> Void
     ) async throws -> [TranslatedSegment] {
         let total = segments.count
         var out: [TranslatedSegment] = []
@@ -58,7 +58,7 @@ public struct IdentityTranslationEngine: TranslationEngine {
         segments: [TranslationSegment],
         sourceLanguage: Locale.Language?,
         targetLanguage: Locale.Language,
-        progress: @Sendable (Int, Int) -> Void
+        progress: @escaping @Sendable (Int, Int) -> Void
     ) async throws -> [TranslatedSegment] {
         let total = segments.count
         var out: [TranslatedSegment] = []
@@ -90,7 +90,7 @@ public struct FailingTranslationEngine: TranslationEngine {
         segments: [TranslationSegment],
         sourceLanguage: Locale.Language?,
         targetLanguage: Locale.Language,
-        progress: @Sendable (Int, Int) -> Void
+        progress: @escaping @Sendable (Int, Int) -> Void
     ) async throws -> [TranslatedSegment] {
         throw TranslationEngineError.engineFailed(message)
     }

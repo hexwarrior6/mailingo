@@ -63,6 +63,9 @@ final class InspectorModel: ObservableObject {
 
     private var analysis: EmailAnalysis?
     private var translationTask: Task<Void, Never>?
+    /// 每次翻译运行发一个令牌。取消不一定能立刻终止正在 await 的调用，
+    /// 所以结果回来时要确认"我还是当前那一次"，否则旧邮件的译文会覆盖新邮件。
+    private var runToken = UUID()
 
     // MARK: - 载入
 
@@ -110,10 +113,13 @@ final class InspectorModel: ObservableObject {
     }
 
     private func translate(analysis: EmailAnalysis, engine: TranslationEngine) async {
+        let token = UUID()
+        runToken = token
         let segments = analysis.segments
 
         // 没有片段就别折腾引擎了，直接给一个原样的结果
         guard !segments.isEmpty else {
+            guard runToken == token else { return }
             inspection = EmailInspector.apply(translations: [:], to: analysis)
             translationStatus = .failed("这封邮件没有提取到可翻译的片段")
             return
@@ -140,6 +146,8 @@ final class InspectorModel: ObservableObject {
             translations = Dictionary(uniqueKeysWithValues: translated.map { ($0.id, $0.targetText) })
             try Task.checkCancellation()
 
+            // 旧运行的结果不许覆盖新邮件
+            guard runToken == token else { return }
             inspection = EmailInspector.apply(translations: translations, to: analysis)
             translationStatus = .idle
         } catch is CancellationError {
@@ -147,6 +155,7 @@ final class InspectorModel: ObservableObject {
         } catch {
             // 失败时仍然把原文渲染出来，并把原因讲清楚 ——
             // 总比一个空窗格好，用户至少能看到邮件内容。
+            guard runToken == token else { return }
             inspection = EmailInspector.apply(translations: [:], to: analysis)
             translationStatus = .failed(Self.describe(error))
         }

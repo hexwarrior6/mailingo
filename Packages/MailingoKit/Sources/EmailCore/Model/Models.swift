@@ -188,7 +188,7 @@ public protocol TranslationEngine: Sendable {
         segments: [TranslationSegment],
         sourceLanguage: Locale.Language?,
         targetLanguage: Locale.Language,
-        progress: @Sendable (_ completed: Int, _ total: Int) -> Void
+        progress: @escaping @Sendable (_ completed: Int, _ total: Int) -> Void
     ) async throws -> [TranslatedSegment]
 }
 

@@ -1,4 +1,6 @@
 import EmailCore
+import Foundation
+import Translation
 import XCTest
 
 @testable import TranslationCore
@@ -124,6 +126,55 @@ final class TranslationCoreTests: XCTestCase {
         }
     }
 
+    // MARK: - 配置触发（这是一个真实踩过的坑，用测试钉住）
+
+    /// **先证实这个坑真的存在**：每次新建 `Configuration` 再 `invalidate()`，
+    /// 得到的配置是**彼此相等**的 —— 因为它们都停在 version 1。
+    ///
+    /// 如果这条断言某天开始失败（Apple 改了 Configuration 的相等性或
+    /// invalidate 的语义），那说明下面那条"必须复用同一实例"的约束可以放宽，
+    /// 这里会第一时间告诉我们。
+    func testFreshConfigurationEachTimeProducesEqualConfigurations() {
+        let target = TranslationLanguages.simplifiedChinese
+
+        var first = TranslationSession.Configuration(source: nil, target: target)
+        first.invalidate()
+        var second = TranslationSession.Configuration(source: nil, target: target)
+        second.invalidate()
+
+        XCTAssertEqual(
+            first, second,
+            """
+            每次新建 Configuration 再 invalidate 竟然不相等了 —— \
+            意味着 Apple 改了语义。此时可以放宽 TranslationConfigurationSequencer \
+            的约束，并重新评估 broker 的设计。
+            """
+        )
+    }
+
+    /// 生产代码用的方式：复用同一个实例反复 invalidate，
+    /// 相邻两次配置**必须**互不相等，否则 `.translationTask` 不会重新触发。
+    func testReusedSequencerAlwaysProducesDistinctConsecutiveConfigurations() {
+        var sequencer = TranslationConfigurationSequencer()
+        let target = TranslationLanguages.simplifiedChinese
+
+        var produced: [TranslationSession.Configuration] = []
+        for _ in 0..<6 {
+            produced.append(sequencer.next(source: nil, target: target))
+        }
+
+        for index in 1..<produced.count {
+            XCTAssertNotEqual(
+                produced[index - 1], produced[index],
+                "第 \(index) 次与上一次配置相等 —— .translationTask 不会重新触发，第二个作业会一直等到超时"
+            )
+        }
+
+        // 语言对变化时也必须产出不同的配置
+        let other = sequencer.next(source: nil, target: Locale.Language(identifier: "ja"))
+        XCTAssertNotEqual(produced.last, other)
+    }
+
     // MARK: - 辅助
 
     private func makeSegments(count: Int) -> [TranslationSegment] {
@@ -161,7 +212,7 @@ private struct AnyEngine: TranslationEngine {
         segments: [TranslationSegment],
         sourceLanguage: Locale.Language?,
         targetLanguage: Locale.Language,
-        progress: @Sendable (Int, Int) -> Void
+        progress: @escaping @Sendable (Int, Int) -> Void
     ) async throws -> [TranslatedSegment] {
         try await wrapped.translate(
             segments: segments,

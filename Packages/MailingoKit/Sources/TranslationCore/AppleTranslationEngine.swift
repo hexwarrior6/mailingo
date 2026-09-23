@@ -69,7 +69,7 @@ public struct AppleTranslationEngine: TranslationEngine {
             try await broker.runVoid(
                 source: nil,
                 target: TranslationLanguages.simplifiedChinese,
-                timeout: timeout
+                sessionTimeout: timeout
             ) { _ in
                 // 拿到 session 就是目的；不做任何调用，避免触发语言包下载。
             }
@@ -80,6 +80,18 @@ public struct AppleTranslationEngine: TranslationEngine {
                 reason: (error as? TranslationEngineError)?.description ?? String(describing: error)
             )
         }
+    }
+
+    /// 连续取多次 session。
+    ///
+    /// 这是针对「第一次翻译正常、之后全部超时」那个 bug 的回归探针：
+    /// 如果配置没有真正"变化"，第 2 次之后就会各超时一次。
+    public func probeSessionRepeatedly(times: Int = 3) async -> [SessionProbeResult] {
+        var results: [SessionProbeResult] = []
+        for _ in 0..<max(1, times) {
+            results.append(await probeSession())
+        }
+        return results
     }
 
     public enum SessionProbeResult: Sendable {
@@ -107,7 +119,7 @@ public struct AppleTranslationEngine: TranslationEngine {
         segments: [TranslationSegment],
         sourceLanguage: Locale.Language?,
         targetLanguage: Locale.Language,
-        progress: @Sendable (Int, Int) -> Void
+        progress: @escaping @Sendable (Int, Int) -> Void
     ) async throws -> [TranslatedSegment] {
         guard !segments.isEmpty else { return [] }
 
@@ -125,33 +137,42 @@ public struct AppleTranslationEngine: TranslationEngine {
             break
         }
 
-        // 3) 分批。Task.checkCancellation 让用户切邮件时能立刻停下。
+        // 3) 分批，但**整次翻译只借一次 session**。
+        //
+        //    早先是"每批要一次 session"，两个坏处：
+        //    - 每次取 session 都要过一次 SwiftUI 的 configuration 触发，往返多；
+        //    - 一旦某次卡住，超时是按次算的，15 批就是 15 次超时叠加，
+        //      UI 上表现为"卡在 0/N 很久然后报错"。
+        //    现在把整个循环放进一次 session 里跑完，progress 照常逐批上报。
         let broker = await self.broker
         let batches = Self.batches(segments, size: batchSize)
         let total = segments.count
-        var collected: [Int: String] = [:]
-        var completed = 0
 
-        for batch in batches {
-            try Task.checkCancellation()
+        let collected = try await broker.run(source: source, target: targetLanguage) { session in
+            var collected: [Int: String] = [:]
+            var completed = 0
 
-            let requests = batch.map {
-                TranslationSession.Request(sourceText: $0.sourceText, clientIdentifier: String($0.id))
+            for batch in batches {
+                // 让用户切邮件时能立刻停下
+                try Task.checkCancellation()
+
+                let requests = batch.map {
+                    TranslationSession.Request(sourceText: $0.sourceText, clientIdentifier: String($0.id))
+                }
+                let responses = try await session.translations(from: requests)
+
+                // 4) 按 clientIdentifier 对账，**不依赖返回顺序** ——
+                //    将来接 LLM 的引擎不保证保序，这里先立好规矩。
+                for response in responses {
+                    guard let identifier = response.clientIdentifier, let id = Int(identifier) else { continue }
+                    collected[id] = response.targetText
+                }
+
+                completed += batch.count
+                progress(completed, total)
             }
 
-            let responses = try await broker.run(source: source, target: targetLanguage) { session in
-                try await session.translations(from: requests)
-            }
-
-            // 4) 按 clientIdentifier 对账，**不依赖返回顺序** ——
-            //    将来接 LLM 的引擎不保证保序，这里先立好规矩。
-            for response in responses {
-                guard let identifier = response.clientIdentifier, let id = Int(identifier) else { continue }
-                collected[id] = response.targetText
-            }
-
-            completed += batch.count
-            progress(completed, total)
+            return collected
         }
 
         // 5) 引擎没回的片段保持原文，避免调用方拿到不完整的字典

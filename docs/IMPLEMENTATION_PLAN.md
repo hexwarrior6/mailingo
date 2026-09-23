@@ -649,7 +649,7 @@ key = SHA256( rawSourceBytes ‖ targetLanguage ‖ engine.id ‖ pipelineVersio
 |---|---|---|---|
 | **S0** ★ | **Mail 扩展探针**：最小 Mail Extension（`MessageSecurityHandler`）返回带 `banner` 的 `MEDecodedMessage`，观察对**普通未加密邮件**的行为 | `decodedMessageForMessageData:` 对普通邮件**确实被调用**（打日志确认）；返回非 nil 后**横幅真的显示**；点横幅能呈现自定义 `MEExtensionViewController`；`data` 参数确实是完整原始 MIME | 🔴 **最高（决定架构 C 是否成立）** |
 | **S1** | 最小 .app：正确 Info.plist + `NSAppleEventsUsageDescription` + 稳定签名，从 Mail 取 `selected messages[0].source` | TCC 弹窗正常出现；**授权在重建后仍有效**；大邮件（>2 MB）不截断、耗时可接受；正文未下载时有明确错误 | 🔴 高（架构 A 的前提） |
-| **S2** | 隐藏 SwiftUI `.translationTask` 宿主（挂在 1x1 子视图上）驱动 100 段批量翻译 | ✅ **桥接部分已验证**：5.7 的窗格里 0.09s 拿到 session。⏳ 端到端批量翻译与每批上限待语言包安装后测 | 🔴 高 |
+| **S2** | 隐藏 SwiftUI `.translationTask` 宿主（挂在 1x1 子视图上）驱动 100 段批量翻译 | ✅ **全部通过**：连续取 session 3/3（0.10s / 1.18s / 0.00s）；282 段真实邮件端到端出中文，1.44s | 🔴 高 |
 | **S3** | CGWindowList 跟随 Mail：移动 / 缩放 / 最小化 / 隐藏 / **全屏 Space** | 几何跟随稳定无抖动；全屏场景结论明确（可行 or 需降级方案）；CPU 占用可接受 | 🟡 中 |
 | **S4** | HTML 保真 harness：20 封真实 HTML 邮件跑 抽取→假翻译→切片 | **非文本字节 100% 一致**；WKWebView 里与原邮件渲染视觉一致 | 🟡 中 |
 | **S5** | Mail 扩展 → 容器 App 的 App Group 握手（架构 C 时） | 几 MB MIME 走文件、通知只传路径；容器 App 能被可靠唤醒；扩展进程无长时间阻塞 | 🟡 中 |
@@ -667,7 +667,7 @@ key = SHA256( rawSourceBytes ‖ targetLanguage ‖ engine.id ‖ pipelineVersio
 | **M1** | 骨架：XcodeGen 工程、SPM 模块、`AppDependencies` 组装、菜单栏、⌥T、日志、测试基建 | 2 天 |
 | **M2** | MailIntegration：脚本 provider、权限探测与引导、全部错误态 | 1.5 天 |
 | **M3** | EmailCore：MIME 解码、Tokenizer、SegmentExtractor、HTMLSplicer、纯文本路径 + 黄金测试 | 4 天 | ✅ **已完成**（23 个单元测试，已接入 App 并排预览） |
-| **M4** | TranslationCore：`TranslationSessionHost`、Apple 引擎、分批/流式、语言检测、`FakeTranslationEngine` | 3 天 | ✅ **已完成**（桥接实测 0.09s 拿到 session；33 个测试） |
+| **M4** | TranslationCore：`TranslationSessionHost`、Apple 引擎、分批/流式、语言检测、`FakeTranslationEngine` | 3 天 | ✅ **已完成**（端到端出中文；35 个测试） |
 | **M5** | Renderer：WKWebView、CID scheme handler、脚本剥离、远程图阻断、渐进更新（含 JS 比对兜底） | 2.5 天 |
 | **M6** | WindowIntegration：跟随、显隐同步、宽度持久化、多 Space/全屏 | 2 天 |
 | **M7** | Cache：key、LRU、失效、rawSource 缓存 | 1 天 |
