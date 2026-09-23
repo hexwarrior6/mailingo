@@ -110,11 +110,13 @@ struct EmailInspectionView: View {
         messagePicker
 
         Button {
-            Task { await model.loadMostRecent() }
+            // 必须**绕过缓存**：有缓存时普通重翻是个空操作，
+            // 用户就没法纠正一个翻坏的译文了。
+            Task { await model.retranslate() }
         } label: {
             Image(systemName: "arrow.clockwise")
         }
-        .help(isDeveloperMode ? "重新读取已捕获的邮件列表" : "重新翻译")
+        .help("重新读取并重新翻译（忽略缓存）")
 
         // 「打开 .eml」是调试用的（喂自造样本），正常使用不需要
         if isDeveloperMode {
@@ -520,6 +522,7 @@ struct EmailInspectionView: View {
         case .hit: ("缓存命中", .green)
         case .missed: ("缓存未命中", .secondary)
         case .stored: ("已写入缓存", .blue)
+        case .bypassed: ("已绕过缓存", .orange)
         }
     }
 

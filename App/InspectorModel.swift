@@ -81,6 +81,8 @@ final class InspectorModel: ObservableObject {
         case hit
         case missed
         case stored
+        /// 用户点了「重新翻译」，这次没查缓存。
+        case bypassed
     }
     @Published private(set) var cacheStatus: CacheStatus = .unknown
 
@@ -162,7 +164,7 @@ final class InspectorModel: ObservableObject {
 
     // MARK: - 载入
 
-    /// 载入最近捕获的那封。
+    /// 载入最近捕获的那封。走缓存 —— 启动时不该为了看一眼就重翻一遍。
     func loadMostRecent() async {
         refreshCapturedMessages(force: true)
         if let newest = capturedMessages.first {
@@ -182,7 +184,8 @@ final class InspectorModel: ObservableObject {
     /// - Parameter manual: 是不是用户手动选的（下拉里点、点横幅、拖文件）。
     ///   手动选过之后要**先别让自动跟随把人拉回去** ——
     ///   否则你刚点开另一封，下一秒就被 Mail 的选中项拽回来。
-    func load(messageID: String, manual: Bool = true) async {
+    /// - Parameter ignoringCache: 见 `retranslate()`。
+    func load(messageID: String, manual: Bool = true, ignoringCache: Bool = false) async {
         if manual { followSuppressed = true }
 
         let stored = capturedMessages.first { $0.id == messageID }
@@ -200,7 +203,7 @@ final class InspectorModel: ObservableObject {
         currentMessage = stored
         currentInternetMessageID = stored.internetMessageID
         do {
-            try await analyze(data: raw)
+            try await analyze(data: raw, ignoringCache: ignoringCache)
         } catch {
             state = .failed("解析失败：\(error.localizedDescription)")
         }
@@ -211,7 +214,7 @@ final class InspectorModel: ObservableObject {
         currentMessage = nil
         currentInternetMessageID = nil
         do {
-            try await analyze(data: Data(contentsOf: fileURL))
+            try await analyze(data: Data(contentsOf: fileURL), ignoringCache: true)
         } catch {
             state = .failed("读取失败：\(error.localizedDescription)")
         }
@@ -350,18 +353,41 @@ final class InspectorModel: ObservableObject {
         restartTranslation()
     }
 
-    func restartTranslation() {
+    /// - Parameter ignoringCache: 见 `retranslate()`。
+    func restartTranslation(ignoringCache: Bool = false) {
         translationTask?.cancel()
         guard let analysis else { return }
 
         let engine = effectiveEngine
         translationTask = Task { [weak self] in
             guard let self else { return }
-            await self.translate(analysis: analysis, engine: engine)
+            await self.translate(analysis: analysis, engine: engine, ignoringCache: ignoringCache)
         }
     }
 
-    private func translate(analysis: EmailAnalysis, engine: TranslationEngine) async {
+    /// 「重新翻译」：**绕过缓存**，强制走一遍引擎。
+    ///
+    /// 缓存让重复翻译变成空操作，所以必须留一个真正的强制入口 ——
+    /// 否则用户碰到一个翻坏的译文就没有任何手段纠正它了。
+    ///
+    /// 重翻的是**你正在看的那一封**，不是"最新捕获的那封"：
+    /// 会话里来回好几封时，点一下 ↻ 就被拽到别的邮件上会很意外。
+    /// 同时先刷一次列表，好让 Mail 后来补上的完整版能被读到。
+    func retranslate() async {
+        refreshCapturedMessages(force: true)
+        guard let id = currentMessage?.id else {
+            // 正在看导入的 .eml（或还没载入任何邮件）：就地把当前分析重翻一遍
+            restartTranslation(ignoringCache: true)
+            return
+        }
+        await load(messageID: id, ignoringCache: true)
+    }
+
+    private func translate(
+        analysis: EmailAnalysis,
+        engine: TranslationEngine,
+        ignoringCache: Bool = false
+    ) async {
         let token = UUID()
         runToken = token
         let segments = analysis.segments
@@ -391,7 +417,8 @@ final class InspectorModel: ObservableObject {
             pipelineVersion: CacheKey.currentPipelineVersion
         )
 
-        if let cached = await TranslationCache.shared.lookup(cacheKey, sourceHash: sourceHash),
+        if !ignoringCache,
+           let cached = await TranslationCache.shared.lookup(cacheKey, sourceHash: sourceHash),
            !cached.isEmpty {
             guard runToken == token else { return }
             inspection = EmailInspector.apply(translations: cached, to: analysis)
@@ -399,7 +426,7 @@ final class InspectorModel: ObservableObject {
             cacheStatus = .hit
             return
         }
-        cacheStatus = .missed
+        cacheStatus = ignoringCache ? .bypassed : .missed
 
         translationStatus = .running(done: 0, total: engineSegments.count)
 
@@ -457,7 +484,7 @@ final class InspectorModel: ObservableObject {
 
     // MARK: - 内部
 
-    private func analyze(data: Data) async throws {
+    private func analyze(data: Data, ignoringCache: Bool = false) async throws {
         state = .loading
 
         let analysis = try await Task.detached(priority: .userInitiated) {
@@ -470,7 +497,7 @@ final class InspectorModel: ObservableObject {
 
         // 先用原样结果占位，再用引擎的结果替换
         self.inspection = EmailInspector.apply(translations: [:], to: analysis)
-        restartTranslation()
+        restartTranslation(ignoringCache: ignoringCache)
     }
 
     private static func describe(_ error: Error) -> String {
