@@ -20,7 +20,7 @@
 | M3 EmailCore：MIME 解码 + HTML 字节切片管线 | ✅ 23 个单元测试 |
 | **M4 TranslationCore：Apple 翻译引擎** | ✅ **端到端跑通**（连续取 session 3/3、实际译文见自检日志） |
 | 会话（来回多封）的精确定位 | ✅ 每封按内容 ID 分开存；点横幅翻译的就是**你看的那一封** |
-| **M5 Renderer（内嵌图片 + 远程图阻断）** | ⬜ **下一步** |
+| **M5 Renderer（内嵌图片 + 远程图阻断）** | ✅ 已完成 |
 | M7 翻译缓存 | ⬜ |
 | M6 吸附侧栏 | ⏸ 缓做（手动把两窗口并排已达到同等效果） |
 | M8 打磨（引导页/本地化/公证） | ⏸ 最后再说 |
@@ -55,6 +55,14 @@ S0 的关键结论：Mail 扩展（Message Security 扩展点）能在**阅读�
 
 打开 Mailingo，**「邮件解析」页签**：
 
+- **内嵌图片（`cid:`）能正常显示**：邮件里的签名 logo、商品图在 HTML 里写的是
+  `src="cid:xxx"`，WebKit 不认这个协议、原样渲染会**完全看不见**。
+  渲染前会把它改写成自定义 scheme，由 `WKURLSchemeHandler` 从 MIME 里取字节喂回去。
+- **外部图片默认不加载**（和 Mail 一致）：远程图片是最常见的追踪手段，
+  发件人靠它知道你何时、看了几次。右上角有「载入远程图片」开关，需要时手动放行。
+- **链接一律跳默认浏览器**，不会在这个小窗格里导航走。
+- 邮件里的脚本一律不执行（`allowsContentJavaScript = false`）——
+  有这一条就不需要再去 HTML 里剥 `<script>`，那是重复防线。
 - **显示模式**：`原文` / `译文` / `双语`（并排对照）三种，选择会记住。
   只看译文在窄窗口（并排放在半屏时）里读数舒服得多。引擎可在三者间切换：
   - **Apple 翻译** —— 系统内置，真译文
@@ -118,7 +126,8 @@ make diagnose      # 地面真相：os_log + appex 是否被拉起 + 注册情�
 | `make bootstrap` | 下载 XcodeGen 到 `.tools/`（幂等） |
 | `make gen` | 由 `project.yml` 生成 `Mailingo.xcodeproj` |
 | `make build` | 编译（含 appex 嵌入与签名） |
-| `make test` | 跑单元测试（33 个，不需要证书、不到一秒） |
+| `make test` | 跑单元测试（71 个，不需要证书、不到一秒） |
+| `make check-render` | 渲染冒烟检查：真的跑一遍 WKWebView，确认 `cid:` 内嵌图能显示 |
 | `make verify-appex` | 校验 appex 是可加载的真扩展，而不是空壳 |
 | `make install-app` | 构建 + 校验 + 装到 `/Applications` + 重新注册 |
 | `make status` | S0 探针四问判定摘要 |

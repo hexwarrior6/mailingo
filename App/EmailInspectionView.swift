@@ -16,6 +16,9 @@ struct EmailInspectionView: View {
     @AppStorage("inspector.displayMode") private var displayMode: DisplayMode = .bilingual
     /// 开发者模式：只影响「多显示哪些调试面板」，不影响布局代码本身。
     @AppStorage(DeveloperMode.storageKey) private var isDeveloperMode = false
+    /// 是否加载外部图片。默认**关闭** —— 远程图片是最常见的追踪手段，
+    /// 发件人靠它知道你什么时候、看了几次。和 Mail 的行为一致。
+    @AppStorage("inspector.loadRemoteImages") private var allowsRemoteContent = false
 
     /// 看什么：只看原文 / 只看译文 / 双语并排。
     ///
@@ -260,9 +263,30 @@ struct EmailInspectionView: View {
                 .lineLimit(1)
 
             Spacer(minLength: 0)
+
+            remoteContentToggle
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+
+    /// 是否加载外部图片。
+    ///
+    /// 默认**不加载**：远程图片是最常见的追踪手段（发件人靠它知道你何时、看了几次），
+    /// 而且加载失败时邮件排版会缺图。需要时手动点一下。
+    private var remoteContentToggle: some View {
+        Toggle(isOn: $allowsRemoteContent) {
+            Label(
+                allowsRemoteContent ? "已载入远程图片" : "载入远程图片",
+                systemImage: allowsRemoteContent ? "photo.badge.checkmark" : "photo.badge.exclamationmark"
+            )
+            .font(.caption)
+        }
+        .toggleStyle(.button)
+        .controlSize(.small)
+        .help(allowsRemoteContent
+              ? "远程图片已载入。关闭可恢复拦截（发件人将无法通过图片得知你已阅读）"
+              : "邮件默认不加载外部图片，以免发件人通过追踪像素得知你已阅读")
     }
 
     private var displayModeHint: String {
@@ -299,6 +323,8 @@ struct EmailInspectionView: View {
             title: "原文",
             subtitle: "\(inspection.originalHTML.count) 字符",
             html: inspection.originalHTML,
+            inlineResources: inspection.decoded.inlineResources,
+            allowsRemoteContent: allowsRemoteContent,
             accent: .secondary
         )
     }
@@ -308,6 +334,8 @@ struct EmailInspectionView: View {
             title: model.isShowingRealTranslation ? "中文译文" : "切片后",
             subtitle: "\(inspection.segments.count) 段",
             html: inspection.splicedHTML,
+            inlineResources: inspection.decoded.inlineResources,
+            allowsRemoteContent: allowsRemoteContent,
             accent: inspection.fidelity.nonTextBytesIdentical ? .green : .red
         )
     }

@@ -11,7 +11,7 @@ LOG      := $(LOGDIR)/probe.log
 SPMDIR   := $(CURDIR)/.build/spm
 
 
-.PHONY: help bootstrap gen build test run register status log stream diagnose clean reset-log install-app verify-appex refresh-plugins
+.PHONY: help bootstrap gen build test check-render run register status log stream diagnose clean reset-log install-app verify-appex refresh-plugins
 
 help:
 	@echo "make bootstrap  下载 XcodeGen 到 .tools/（无需 sudo，固定版本；克隆后先跑这个）"
@@ -64,6 +64,18 @@ build: gen
 #    在已是沙盒的环境里嵌套 sandbox-exec 会失败。
 #  TMPDIR / CLANG_MODULE_CACHE_PATH：默认缓存落在 ~/Library 与 DARWIN_USER_CACHE_DIR，
 #    受限环境不可写。
+# 渲染冒烟检查。
+#
+# 渲染是唯一**没法用单元测试覆盖**的一环：它要跑真的 WKWebView、
+# 真的走一遍 WKURLSchemeHandler。没有这个目标时，改了渲染代码只能靠人眼看。
+check-render:
+	@mkdir -p "$(SPMDIR)/tmp" "$(CURDIR)/.build/swiftcache"
+	@TMPDIR="$(SPMDIR)/tmp" swift \
+	  -module-cache-path "$(CURDIR)/.build/swiftcache" \
+	  -sdk "$$(xcrun --show-sdk-path --sdk macosx)" \
+	  Scripts/render-check.swift "$(CURDIR)/.build/render-check.png"
+	@open "$(CURDIR)/.build/render-check.png" 2>/dev/null || true
+
 test:
 	@mkdir -p "$(SPMDIR)/tmp" "$(SPMDIR)/mc"
 	@cd Packages/MailingoKit && \
