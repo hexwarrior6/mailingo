@@ -274,15 +274,25 @@ mailingo/
 **依赖方向（单向，不允许回头）**：
 
 ```
-App ──> WindowIntegration, Renderer, Infrastructure
- │
- └──> MailIntegration ──> EmailCore <── TranslationCore ──> Cache
+App ──> EmailCore, TranslationCore, MailIntegration, Cache
+                 │
+                 └──> EmailCore <── TranslationCore
+                 │
+                 └──> (Cache 谁也不依赖)
 ```
 
 关键约束：
 - `EmailCore` **绝不 import AppKit / SwiftUI**。可以加一个 CI 检查脚本 grep `import AppKit` 来守住。
 - `TranslationCore` 不知道 `MailIntegration` 存在。
+- `Cache` **只依赖 Foundation + CryptoKit**，不认识 `TranslationSegment` 或任何引擎 ——
+  接口上只出现 `CacheKey` / `[Int: String]` / `Data`，这样"缓存不该知道业务模型"是编译器保证的。
 - 只有 `App/AppDependencies.swift` 做依赖注入组装，其他模块一律面向 protocol。
+
+> **实施修正（M7）**：上图里 `Renderer` / `WindowIntegration` / `Infrastructure` / `ExtensionBridge`
+> 这四个模块最终**没有单独拆包**，都落在 `App/` 与 `Shared/` 里。理由是它们的边界本来就很薄
+> （各自几个文件），拆成独立 target 只增加 `project.yml` 与 import 噪音，挡不住任何真实的耦合。
+> 真正需要编译器守住的边界只有两条 —— **`EmailCore` 不碰 UI**、**`Cache` 不认识业务模型** ——
+> 这两条都已经是独立 target。
 
 ### 3.2 用 XcodeGen 而不是手改 xcodeproj
 
@@ -537,20 +547,37 @@ protocol MailWindowObserver: Sendable {
 - **全屏 Mail**：`.canJoinAllSpaces + .fullScreenAuxiliary` 通常能让面板出现在别的 App 的全屏 Space 上，但**这一条必须 Spike 3 实测**（跨 App 全屏行为在不同 macOS 版本上不一致）。兜底方案：检测到 Mail 进入全屏时降级为"面板贴在屏幕右侧 + 提示"或暂时隐藏。
 - **模式 B（V1.1）**：`AXUIElement` 读/写 Mail 窗口的 `kAXSizeAttribute` / `kAXPositionAttribute`，先给 Mail 让位再放面板，关闭时还原。做成设置项「让 Mail 让出空间」。
 
-### 4.8 Cache
+### 4.8 Cache ✅ 已实现（`Packages/MailingoKit/Sources/Cache/TranslationCache.swift`）
+
+初版设想与最终实现的差异，以及各自的理由：
 
 ```swift
-key = SHA256( rawSourceBytes ‖ targetLanguage ‖ engine.id ‖ pipelineVersion )
+// 身份（决定"是不是同一封邮件"）
+messageKey   = normalizeMessageID(internetMessageID) ?? contentHash(originalHTML)
+// 内容指纹（决定"译文还算不算数"）
+sourceHash   = SHA256(originalHTML).prefix(16)
+// 文件名 = SHA256(messageKey ‖ targetLanguage ‖ engineID ‖ pipelineVersion)
 ```
 
-- PRODUCT.md §11 建议含 `Message-ID`。**要注意 `Message-ID` 单独做 key 不安全**（同一 ID 内容可能变/重复），所以以**内容哈希为主键**，`Message-ID`/`message id`/`subject` 只作为元数据存下来做调试与统计。
-- `pipelineVersion` 很重要：切片算法或实体处理一旦修改，旧缓存必须失效。
-- 存储：`~/Library/Application Support/Mailingo/Cache/<key>.html` + `<key>.json`（segments + 元数据）。L1 是内存 `NSCache`，L2 是磁盘。
-- 淘汰：按 mtime 的 LRU + 总容量上限（默认 200 MB）；原子写入（写临时文件 + `replaceItemAt`）。
-- 缓存内容：**译文 HTML、segments、源语言、引擎 id、时间戳**；V2 加译文图片。
-- 另外单独缓存 `rawSource`（按 Mail message id，短 TTL）—— `source` 这个 Apple Event 不便宜，同一封邮件反复触发时省一次往返。
+- **身份与有效性拆成两件事**：初版说"以内容哈希为主键"，但实测 Mail 会**分批交付同一封邮件**
+  （先空壳 24,831 B、后完整 17,997,133 B，差 725 倍）。两者 **HTML 逐字节相同**（`sha=54a3ddb0772702f4`），
+  只有附件的图片数据不同。所以用 `Message-ID` 做身份、用 HTML 哈希做有效性校验：
+  完整版到达时能直接命中空壳版算出的缓存，不白翻一遍；而 HTML 真变了（转发加签名等）缓存自动失效。
+- **只缓存译文，不缓存 HTML**。HTML 每次都从 `.eml` 重新渲染 —— 因为 CID 改写、远程图阻断
+  这些是**渲染期**才做的事（见 §4.6），一旦把改写结果写进缓存，下次就得反解析自己造的 HTML。
+  缓存里存的是 `[段 id: 译文]` 这个最小事实。
+- **`pipelineVersion` 仍然很重要**：切片算法或实体处理一旦修改，旧缓存必须失效（现为 `CacheKey.currentPipelineVersion = 1`）。
+- **存储位置改成 `~/Library/Caches/Mailingo/translations/<hash>.json`**，不是 Application Support：
+  这本就是随时可重建的数据，放 Caches 让系统在磁盘紧张时可以回收。
+- **一条缓存一个文件，文件名是键的哈希**，mtime 即"最近使用时间"。这样清理可以直接靠文件系统
+  的 mtime 与 size 统计，不需要额外维护一份索引（索引本身就是需要同步的可变状态）。
+- **淘汰**：先按天数（`maxAgeDays`），再按总大小（`maxSizeMB`）从最久未用的开始删。
+  两个上限都是 **0 = 不限**，且都由用户在设置窗口里定（D13）。启动时与每次写入后各清一次。
+- **不再需要 L1 内存缓存**，也不再需要单独缓存 `rawSource` —— App 同一时刻只持有一封邮件的 inspection，
+  内存缓存没有可命中的对象；而 `rawSource` 那次 AppleScript 往返随 M2 一起消失了。
+- **原子写入**用 `Data.write(options: .atomic)`。
 
-**扩展性要求**：`CacheStore` 是 `actor`，接口只认 `Data`/`Codable`，不知道任何模型/引擎细节（PRODUCT.md §13）。
+**扩展性要求**：`TranslationCache` 是 `actor`，接口只认 `Data`/`Codable`，不知道任何模型/引擎细节（PRODUCT.md §13）。
 
 ---
 
@@ -667,14 +694,14 @@ key = SHA256( rawSourceBytes ‖ targetLanguage ‖ engine.id ‖ pipelineVersio
 | **M0** | **动手前先花小钱验证"路能不能走通"** —— 有些事猜不准（Mail 到底允不允许插件读邮件），先做最小实验，避免写半个月才发现方向错 | 2–3 天 | 🟩 **已完成**（S0 ✅ + S2 ✅） |
 | **M1** | **搭框架**：工程组织、日志、测试、一键可构建。用户看不见，但后面全靠它 | 2 天 | 🟨 **70%**（缺组合根 `AppDependencies`；SPM 模块改用静态库 target） |
 | ~~M2~~ | ~~用 AppleScript「问」Mail 要邮件~~ | ~~1.5 天~~ | ❌ **已删除**（见下方说明） |
-| **M3** | **把邮件拆开，找出哪些文字要翻，同时保证排版一个字节都不动** —— 整个产品的技术核心 | 4 天 | 🟩 **100%**（50 个测试中的 23 个） |
+| **M3** | **把邮件拆开，找出哪些文字要翻，同时保证排版一个字节都不动** —— 整个产品的技术核心 | 4 天 | 🟩 **100%** |
 | **M4** | **真正调用系统翻译，英文变中文** —— 难点不在"翻"，在 macOS 15 上拿不到翻译接口，得绕弯 | 3 天 | 🟩 **100%** |
-| **M5** ▶ | **把译文漂亮地显示出来**：内嵌图片能看、链接能点、样式对、外部追踪像素挡掉 | 2 天 | 🟨 **25%** ← **下一步** |
-| **M7** | **翻过的邮件存起来**，同一封再点不用重翻 | 1 天 | ⬜ 未开始（排在 M5 之后） |
+| **M5** | **把译文漂亮地显示出来**：内嵌图片能看、链接能点、样式对、外部追踪像素挡掉 | 2 天 | 🟩 **100%**（按缩小后的范围；渐进更新已移出，见 §9.1 ③） |
+| **M7** | **翻过的邮件存起来**，同一封再点不用重翻 | 1 天 | 🟩 **100%**（含用户可调的清理策略，见 D13） |
 | **M6** | ~~把显示区做成吸附在 Mail 右边的侧栏、跟着 Mail 移动~~ | ~~2 天~~ | ⏸ **缓做**（见下方说明） |
 | **M8** | **打磨到能给别人用**：首次引导、看得懂的错误提示、中英文界面、正式签名 | 2 天 | ⬜ 最后再说 |
 | **M9** | **在 Mail 界面里加入口按钮**，并把邮件内容交给 App | 3–4 天 | 🟩 **已完成**（含会话内精确定位，原计划没有） |
-| | **合计** | **≈ 12–15 个工作日** | 已完成约 **55%** |
+| | **合计** | **≈ 12–15 个工作日** | 已完成约 **85%**（106 个单元测试全绿；主链路全部打通，余下是 M8 打磨） |
 
 ## 9.1 相对初版的三处调整
 
@@ -753,6 +780,7 @@ key = SHA256( rawSourceBytes ‖ targetLanguage ‖ engine.id ‖ pipelineVersio
 | D10 | **M5 优先且缩小范围** | ▶ 只做 CID 内嵌图渲染 + 远程图阻断 + 剥离脚本；**渐进更新移出**，等有需要再说 |
 | D11 | **M8 打磨** | ⏸ 最后再说 |
 | D12 | **并排使用** | 窗口最小尺寸降到 `480×420`，保证能缩到半屏宽；工具栏在窄宽度下要能折行 |
+| D13 | **M7 缓存清理策略** | ✅ **交给用户定**：设置窗口里可改「保留多少天」（0 = 不限）与「总大小上限 MB」（0 = 不限），另有「立即清理 / 清空全部」。淘汰按**最近使用时间**（文件 mtime）而不是创建时间，常用的不会因为放得久就被删 |
 
 **S0 带来的设计修正（已并入本文相关章节）**：
 - 容器 App 非沙盒、**appex 必须沙盒**（§5.2）—— 沙盒按 target 分开决定。

@@ -1,4 +1,5 @@
 import AppKit
+import Cache
 import EmailCore
 import Foundation
 import MailIntegration
@@ -74,6 +75,15 @@ final class InspectorModel: ObservableObject {
     @Published private(set) var translationStatus: TranslationStatus = .idle
     @Published private(set) var mailFollowStatus: MailFollowStatus = .off
 
+    /// 缓存命中情况，给开发者面板看。
+    enum CacheStatus: Equatable {
+        case unknown
+        case hit
+        case missed
+        case stored
+    }
+    @Published private(set) var cacheStatus: CacheStatus = .unknown
+
     /// 是否跟随 Mail 的选中项自动切换。持久化 —— 这是个长期偏好。
     @Published var followsMailSelection: Bool =
         UserDefaults.standard.bool(forKey: InspectorModel.followsMailSelectionKey) {
@@ -120,6 +130,16 @@ final class InspectorModel: ObservableObject {
     /// Mail 对同一封会回调两次（先空壳、后完整），我们需要悄悄换上完整那份，
     /// 否则内嵌图片会一直是空白。
     private var currentInternetMessageID: String?
+    /// 缓存清理策略（用户在设置里改，存在 UserDefaults）。
+    static let cacheMaxAgeDaysKey = "cache.maxAgeDays"
+    static let cacheMaxSizeMBKey = "cache.maxSizeMB"
+
+    private var cachePolicy: CachePolicy {
+        let defaults = UserDefaults.standard
+        let days = (defaults.object(forKey: Self.cacheMaxAgeDaysKey) as? Int) ?? CachePolicy.default.maxAgeDays
+        let megabytes = (defaults.object(forKey: Self.cacheMaxSizeMBKey) as? Int) ?? CachePolicy.default.maxSizeMB
+        return CachePolicy(maxAgeDays: days, maxSizeMB: megabytes)
+    }
     /// 上一次从 Mail 读到的选中项，用来判断"选择变了没有"。
     private var lastMailSelectionID: String?
     /// 用户手动选过邮件之后，先别让自动跟随把他拉回去 ——
@@ -131,6 +151,8 @@ final class InspectorModel: ObservableObject {
     // MARK: - 启动
 
     func bootstrap() async {
+        // 启动时先按策略清理一次缓存，避免长期不打开设置就一直不清理
+        _ = await TranslationCache.shared.purge(policy: cachePolicy)
         refreshCapturedMessages(force: true)
         await loadMostRecent()
         // 启动时自检一次，但**不触发系统下载弹窗** ——
@@ -357,6 +379,28 @@ final class InspectorModel: ObservableObject {
             ? segments
             : segments.filter { !$0.isContextlessOrphan }
 
+        // ── 查缓存 ──────────────────────────────────────────────
+        // 身份优先用 Message-ID（同一封邮件的两次交付落到同一个键），
+        // 内容指纹用 HTML 哈希（HTML 变了就重翻）。
+        let sourceHash = TranslationCache.contentHash(of: analysis.originalHTML)
+        let messageKey = currentInternetMessageID.map(MIMEHeaders.normalizeMessageID) ?? sourceHash
+        let cacheKey = CacheKey(
+            messageKey: messageKey,
+            targetLanguage: TranslationLanguages.simplifiedChinese.minimalIdentifier,
+            engineID: engine.id,
+            pipelineVersion: CacheKey.currentPipelineVersion
+        )
+
+        if let cached = await TranslationCache.shared.lookup(cacheKey, sourceHash: sourceHash),
+           !cached.isEmpty {
+            guard runToken == token else { return }
+            inspection = EmailInspector.apply(translations: cached, to: analysis)
+            translationStatus = .idle
+            cacheStatus = .hit
+            return
+        }
+        cacheStatus = .missed
+
         translationStatus = .running(done: 0, total: engineSegments.count)
 
         do {
@@ -375,6 +419,13 @@ final class InspectorModel: ObservableObject {
             guard runToken == token else { return }
 
             let translations = Dictionary(uniqueKeysWithValues: translated.map { ($0.id, $0.targetText) })
+
+            // 写缓存，然后按用户策略清理（超过天数或超过大小就淘汰最久未用的）
+            await TranslationCache.shared.store(cacheKey, sourceHash: sourceHash, translations: translations)
+            await TranslationCache.shared.purge(policy: cachePolicy)
+            guard runToken == token else { return }
+            cacheStatus = .stored
+
             inspection = EmailInspector.apply(translations: translations, to: analysis)
             translationStatus = .idle
         } catch is CancellationError {

@@ -91,6 +91,19 @@ targets:
         SKIP_INSTALL: YES
         ENABLE_APP_SANDBOX: NO
 
+  Cache:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Packages/MailingoKit/Sources/Cache
+    settings:
+      base:
+        PRODUCT_NAME: Cache
+        PRODUCT_BUNDLE_IDENTIFIER: com.zhuyuhao.Mailingo.Cache
+        DEFINES_MODULE: YES
+        SKIP_INSTALL: YES
+        ENABLE_APP_SANDBOX: NO
+
   MailIntegration:
     type: library.static
     platform: macOS
@@ -137,6 +150,7 @@ targets:
       - target: EmailCore
       - target: TranslationCore
       - target: MailIntegration
+      - target: Cache
     settings:
       base:
         PRODUCT_NAME: Mailingo

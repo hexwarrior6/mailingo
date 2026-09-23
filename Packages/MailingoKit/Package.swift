@@ -12,12 +12,14 @@ let package = Package(
     products: [
         .library(name: "EmailCore", targets: ["EmailCore"]),
         .library(name: "TranslationCore", targets: ["TranslationCore"]),
-        .library(name: "MailIntegration", targets: ["MailIntegration"])
+        .library(name: "MailIntegration", targets: ["MailIntegration"]),
+        .library(name: "Cache", targets: ["Cache"])
     ],
     targets: [
         .target(name: "EmailCore"),
         .target(name: "TranslationCore", dependencies: ["EmailCore"]),
         .target(name: "MailIntegration", dependencies: ["EmailCore"]),
+        .target(name: "Cache"),
         .testTarget(
             name: "EmailCoreTests",
             dependencies: ["EmailCore"],
@@ -30,7 +32,8 @@ let package = Package(
         .testTarget(
             name: "MailIntegrationTests",
             dependencies: ["MailIntegration", "EmailCore"]
-        )
+        ),
+        .testTarget(name: "CacheTests", dependencies: ["Cache"])
     ],
     // 与 App target 的 SWIFT_VERSION=5.0 保持一致。
     // 迁到 Swift 6 语言模式（严格并发）是独立的一件事，方案 §6 已列为要求，

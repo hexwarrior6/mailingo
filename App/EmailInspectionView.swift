@@ -492,6 +492,11 @@ struct EmailInspectionView: View {
                     if orphanCount > 0 {
                         chip(orphanChipLabel(count: orphanCount), color: .orange)
                     }
+
+                    // 缓存命中情况：重开同一封邮件应该直接命中，不该再跑一次翻译
+                    if let cache = cacheChip {
+                        chip(cache.label, color: cache.color)
+                    }
                 }
             }
 
@@ -505,6 +510,16 @@ struct EmailInspectionView: View {
                     .foregroundStyle(.tertiary)
                     .textSelection(.enabled)
             }
+        }
+    }
+
+    /// 缓存 chip 的文案与配色。未知状态不给 chip，免得空窗期闪一个假的结论。
+    private var cacheChip: (label: String, color: Color)? {
+        switch model.cacheStatus {
+        case .unknown: nil
+        case .hit: ("缓存命中", .green)
+        case .missed: ("缓存未命中", .secondary)
+        case .stored: ("已写入缓存", .blue)
         }
     }
 

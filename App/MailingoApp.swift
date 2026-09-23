@@ -25,6 +25,11 @@ struct MailingoApp: App {
             CommandGroup(replacing: .newItem) {}
             DeveloperModeCommands()
         }
+
+        // 标准的 macOS 设置窗口：「Mailingo → 设置…」（⌘,）
+        Settings {
+            SettingsView()
+        }
     }
 }
 
