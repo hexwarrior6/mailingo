@@ -36,15 +36,17 @@ final class MailActivationFollower {
 
     static let shared = MailActivationFollower()
 
-    /// 「Mail 到前台 → 我们提窗」的开关。
+    /// 「跟随 Mail 一起进退」的总开关。
+    ///
     /// 始终挂着观察者、在回调里读这个标志 —— 通知频率极低（切 App 才有），
     /// 没必要为它维护启停状态。设置界面直接写同一个 key。
     static let enabledKey = "followMailActivation"
 
-    /// 「Mail 退到后台 → 我们藏起来」的开关。单独一个，理由见类注释。
-    static let hidesWhenMailHidesKey = "hideWhenMailGoesBack"
-
     private static let mailBundleID = "com.apple.mail"
+
+    /// 自己刚激活之后的"宽限期"：这段时间内不响应 Mail 的失活通知。
+    /// 详见 `mailWentBack` 的第二道判断。
+    private static let selfActivationGrace: TimeInterval = 1.5
 
     private let logger = Logger(subsystem: "com.zhuyuhao.Mailingo", category: "follow")
     private var observers: [NSObjectProtocol] = []
@@ -55,13 +57,16 @@ final class MailActivationFollower {
     /// 里的 `WindowAccessor` 把真正的宿主窗口交进来。
     weak var mainWindow: NSWindow?
 
-    private var raisesWhenMailAppears: Bool {
+    private var isEnabled: Bool {
         UserDefaults.standard.bool(forKey: Self.enabledKey)
     }
 
-    private var hidesWhenMailGoesBack: Bool {
-        UserDefaults.standard.bool(forKey: Self.hidesWhenMailHidesKey)
-    }
+    /// 我们自己最近一次变成活动 App 的时刻。
+    ///
+    /// 用来防一个竞态：App 被 `mailingo://` 拉起来的瞬间会激活自己，于是
+    /// Mail 失活、通知立刻打过来 —— 而这时 `frontmostApplication` **可能还没
+    /// 更新完**，看着前台仍是 Mail。那样我们就会刚弹出来就把自己藏掉。
+    private var lastSelfActivation = Date.distantPast
 
     private init() {}
 
@@ -79,6 +84,14 @@ final class MailActivationFollower {
             self.mailCameForward()
         })
 
+        observers.append(NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.lastSelfActivation = Date()
+        })
+
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didDeactivateApplicationNotification,
             object: nil,
@@ -92,7 +105,7 @@ final class MailActivationFollower {
     }
 
     private func mailCameForward() {
-        guard raisesWhenMailAppears, let window = mainWindow else { return }
+        guard isEnabled, let window = mainWindow else { return }
 
         // 窗口可能因为 Mail 之前退到后台而被我们藏起来了，先放出来再提到最前。
         // 注意是 `unhideWithoutActivation` —— 同样不能激活自己。
@@ -109,14 +122,26 @@ final class MailActivationFollower {
     /// 只在**单独**开了"也藏起来"时才动。默认什么都不做 —— 我们本来就没占
     /// 前台那个位置，"我们在后台"一直成立，不需要代码去实现。
     private func mailWentBack() {
-        guard hidesWhenMailGoesBack else { return }
+        guard isEnabled else { return }
 
-        // ★ 这道判断不能少：Mail 失活**可能是我们自己造成的** —— 用户点了我们的
-        //   窗口，于是我们变成活动 App、Mail 失活。这时如果照做把自己藏起来，
-        //   用户正在操作的窗口会当场消失。
+        // ★ 两道判断不能少，各挡一种误藏。
+
+        // 其一：Mail 失活**可能是我们自己造成的** —— 用户点了我们的窗口，
+        //       于是我们变成活动 App、Mail 失活。照做会把你正在操作的窗口藏掉。
         let frontmost = Self.frontmostID
         guard frontmost != Bundle.main.bundleIdentifier else {
             logger.notice("跟随：Mail 失活但前台是我们自己（用户点了我们的窗口）→ 不藏")
+            return
+        }
+
+        // 其二：**刚被激活的那一下不算**。App 被 mailingo:// 拉起来时会激活自己，
+        //       于是 Mail 立刻失活；而这时 frontmostApplication 可能还没更新完，
+        //       看着前台仍是 Mail —— 那样就会刚弹出来就把自己藏掉。
+        //       实测症状正是"第一次打开不跟随、之后才正常"：第一次的这条通知
+        //       被这道闸挡下了（或者反过来把自己藏了），之后状态稳定才走对。
+        let sinceActivation = Date().timeIntervalSince(lastSelfActivation)
+        guard sinceActivation > Self.selfActivationGrace else {
+            logger.notice("跟随：Mail 失活，但我们在 \(Int(sinceActivation * 1000)) ms 前刚激活过 → 不藏")
             return
         }
 
