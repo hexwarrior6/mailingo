@@ -168,6 +168,10 @@ final class InspectorModel: ObservableObject {
         }
     }
 
+    /// 冷启动时 `mailingo://` 带来的目标邮件。
+    /// 用来让 `bootstrap` 判断"这次是被横幅拉起来的"，从而不去 load 最近一封。
+    private var launchedMessageID: String?
+
     /// 这次会话里**见到过** Mail 的阅读窗口。
     ///
     /// 这是自动关窗的前置条件，缺了它会误伤：从 Finder 打开 Mailingo 翻看
@@ -244,7 +248,20 @@ final class InspectorModel: ObservableObject {
         _ = await TranslationCache.shared.purge(policy: cachePolicy)
         startWatchingMessagesDirectory()
         refreshCapturedMessages(force: true)
-        await loadMostRecent()
+
+        // ★ 被 Mail 横幅拉起来时，要显示的是**用户点的那一封**，不是"最近捕获的
+        //   一封"。两个载入同时跑会互相顶掉：被顶掉的那次不会走到
+        //   `restartTranslation`，于是"翻译中 0/N"就没人收尾了。
+        //
+        //   两种到达顺序都覆盖：`launchedMessageID` 管 onOpenURL 先到的情况，
+        //   请求文件管 .task 先到的情况（扩展是先写文件、再打开 URL 的）。
+        let cameFromBanner = launchedMessageID != nil
+            || MessageStore.readPendingRequest() != nil
+        if cameFromBanner {
+            trace.notice("由 Mail 横幅唤起 → 只载入点的那一封，不抢最近一封")
+        } else {
+            await loadMostRecent()
+        }
         // 启动时自检一次，但**不触发系统下载弹窗** ——
         // 只是把「语言包装了没」这类事实记下来，用户没要求就别打扰他。
         await runDiagnostics(allowDownloadTrigger: false)
@@ -345,8 +362,18 @@ final class InspectorModel: ObservableObject {
         // 就会继续跑，甚至在新邮件已经显示之后才把旧译文写回 `inspection`。
         // 换掉 `runToken` 是把那条路彻底堵死 —— 在途的旧译文回来时对不上号，
         // 只能被丢弃（但它的缓存写入仍然有效，不浪费）。
+        // 连同它派生出来的翻译一起掐掉，**并且把进度状态清干净**。
+        //
+        // ★ 不清会留下一个假的"翻译中 0/N"永远转下去：在途翻译的结果会被
+        //   代次守卫丢掉（见 `translate` 里的 runToken 检查），但状态没有任何
+        //   代码负责改回来。实测触发过 —— 用户得手动点刷新才能恢复。
+        //   守卫挡住过期数据只是半件事，收尾是另一半。
+        if translationStatus != .idle {
+            trace.notice("载入新邮件 → 丢弃上一次的翻译进度")
+        }
         translationTask?.cancel()
         runToken = UUID()
+        translationStatus = .idle
 
         let token = UUID()
         loadToken = token
@@ -432,7 +459,11 @@ final class InspectorModel: ObservableObject {
               let id = components.queryItems?.first(where: { $0.name == "id" })?.value,
               !id.isEmpty else { return }
 
-        // 立刻记下 nonce，避免随后的轮询把同一个请求再处理一遍
+        // 记下目标 + 把请求文件消费掉（一次性）。
+        // `launchedMessageID` 还要给 bootstrap 用：冷启动时 onOpenURL 与 .task
+        // 的先后是不确定的，bootstrap 靠它判断"这次是被横幅拉起来的，
+        // 别再去 load 最近一封"。
+        launchedMessageID = id
         markCurrentRequestHandled()
         Task { await load(messageID: id) }
     }
@@ -605,6 +636,7 @@ final class InspectorModel: ObservableObject {
               request.nonce != lastHandledRequestNonce else { return }
 
         lastHandledRequestNonce = request.nonce
+        MessageStore.clearPendingRequest()
         Task { await load(messageID: request.messageID) }
     }
 
@@ -622,6 +654,7 @@ final class InspectorModel: ObservableObject {
 
     private func markCurrentRequestHandled() {
         lastHandledRequestNonce = MessageStore.readPendingRequest()?.nonce
+        MessageStore.clearPendingRequest()
     }
 
     // MARK: - 已捕获列表
@@ -751,7 +784,10 @@ final class InspectorModel: ObservableObject {
             )
 
             try Task.checkCancellation()
-            guard runToken == token else { return }
+            guard runToken == token else {
+                trace.notice("译文被丢弃：翻译期间发生了新的载入（不是同一封）")
+                return
+            }
 
             let translations = Dictionary(uniqueKeysWithValues: translated.map { ($0.id, $0.targetText) })
 
@@ -766,7 +802,12 @@ final class InspectorModel: ObservableObject {
             inspection = applied
             translationStatus = .idle
         } catch is CancellationError {
-            // 用户切了引擎或换了邮件，静默丢弃
+            // 用户切了引擎或换了邮件，静默丢弃。
+            //
+            // 但"翻译中…"这个状态不能就这么留着：被取代时新的一次翻译会在它
+            // 自己开始时重设状态，可万一是**被取消而没人接手**（比如引擎切走了、
+            // 却没有新的载入），界面就会永远转下去。
+            if runToken == token { translationStatus = .idle }
         } catch {
             guard runToken == token else { return }
             // 失败时仍然把原文渲染出来，并把原因讲清楚 ——

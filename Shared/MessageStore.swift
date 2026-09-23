@@ -194,6 +194,14 @@ public enum MessageStore {
         try? data.write(to: SharedPaths.pendingRequest, options: .atomic)
     }
 
+    /// 处理完之后把请求文件删掉。
+    ///
+    /// 请求是**一次性**的：留着它，每次冷启动（现在关窗即退出，冷启动很频繁）
+    /// 都会把上一次点过的邮件再"处理"一遍，跟本次真正的目标抢着载入。
+    public static func clearPendingRequest() {
+        try? FileManager.default.removeItem(at: SharedPaths.pendingRequest)
+    }
+
     public static func readPendingRequest() -> PendingTranslationRequest? {
         guard let data = try? Data(contentsOf: SharedPaths.pendingRequest) else { return nil }
         return try? JSONDecoder.messages.decode(PendingTranslationRequest.self, from: data)
