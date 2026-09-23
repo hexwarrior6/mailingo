@@ -14,6 +14,8 @@ struct EmailInspectionView: View {
     @State private var isImporting = false
     @AppStorage("inspector.showSegments") private var isSegmentsVisible = true
     @AppStorage("inspector.displayMode") private var displayMode: DisplayMode = .bilingual
+    /// 开发者模式：只影响「多显示哪些调试面板」，不影响布局代码本身。
+    @AppStorage(DeveloperMode.storageKey) private var isDeveloperMode = false
 
     /// 看什么：只看原文 / 只看译文 / 双语并排。
     ///
@@ -82,51 +84,57 @@ struct EmailInspectionView: View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 10) {
                 toolbarLeading
-                Divider().frame(height: 16)
-                toolbarTrailing
+                if isDeveloperMode {
+                    Divider().frame(height: 16)
+                    toolbarTrailing
+                }
                 Spacer(minLength: 0)
             }
             .padding(12)
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) { toolbarLeading; Spacer(minLength: 0) }
-                HStack(spacing: 10) { toolbarTrailing; Spacer(minLength: 0) }
+                if isDeveloperMode {
+                    HStack(spacing: 10) { toolbarTrailing; Spacer(minLength: 0) }
+                }
             }
             .padding(12)
         }
     }
 
+    @ViewBuilder
     private var toolbarLeading: some View {
-        Group {
-            messagePicker
+        messagePicker
 
-            Button {
-                Task { await model.loadMostRecent() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .help("重新读取已捕获的邮件列表")
+        Button {
+            Task { await model.loadMostRecent() }
+        } label: {
+            Image(systemName: "arrow.clockwise")
+        }
+        .help(isDeveloperMode ? "重新读取已捕获的邮件列表" : "重新翻译")
 
+        // 「打开 .eml」是调试用的（喂自造样本），正常使用不需要
+        if isDeveloperMode {
             Button("打开 .eml…") { isImporting = true }
         }
     }
 
+    /// 只有开发者模式才有的控件：切引擎、跑自检。
+    @ViewBuilder
     private var toolbarTrailing: some View {
-        Group {
-            Picker("引擎", selection: $model.engineChoice) {
-                ForEach(InspectorModel.EngineChoice.allCases) { choice in
-                    Text(choice.label).tag(choice)
-                }
+        Picker("引擎", selection: $model.engineChoice) {
+            ForEach(InspectorModel.EngineChoice.allCases) { choice in
+                Text(choice.label).tag(choice)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(minWidth: 200, idealWidth: 240, maxWidth: 280)
-
-            Button("翻译自检") {
-                Task { await model.runDiagnostics(allowDownloadTrigger: true) }
-            }
-            .help("跑一遍完整翻译并写入 translation-selftest.log。语言包未安装时会触发系统下载确认。")
         }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(minWidth: 200, idealWidth: 240, maxWidth: 280)
+
+        Button("翻译自检") {
+            Task { await model.runDiagnostics(allowDownloadTrigger: true) }
+        }
+        .help("跑一遍完整翻译并写入 translation-selftest.log。语言包未安装时会触发系统下载确认。")
     }
 
     /// 会话（来回好几封回复）里从这里选具体是哪一封。
@@ -211,7 +219,8 @@ struct EmailInspectionView: View {
             // VSplitView：中间那条分隔线可以**上下拖拽**，用来调整
             // 「原文 / 译文」预览区的高度 —— 长邮件里这是最需要能调的一块。
             // 折叠时把表格整个撤掉，预览区自然占满剩余空间。
-            if isSegmentsVisible {
+            // 「提取出的片段」是调试面板：正常使用完全不需要看到它
+            if isDeveloperMode, isSegmentsVisible {
                 VSplitView {
                     previews(inspection)
                         .frame(minHeight: 160)
@@ -222,9 +231,11 @@ struct EmailInspectionView: View {
                 previews(inspection)
             }
 
-            Divider()
-            // 折叠条固定在窗口底部：展开还是折叠都停在同一位置，不会跳。
-            segmentsToggleBar(count: inspection.segments.count)
+            if isDeveloperMode {
+                Divider()
+                // 折叠条固定在窗口底部：展开还是折叠都停在同一位置，不会跳。
+                segmentsToggleBar(count: inspection.segments.count)
+            }
         }
     }
 
@@ -294,7 +305,7 @@ struct EmailInspectionView: View {
 
     private func translatedPane(_ inspection: EmailInspection) -> some View {
         PreviewPane(
-            title: model.engineChoice.isRealTranslation ? "中文译文" : "切片后",
+            title: model.isShowingRealTranslation ? "中文译文" : "切片后",
             subtitle: "\(inspection.segments.count) 段",
             html: inspection.splicedHTML,
             accent: inspection.fidelity.nonTextBytesIdentical ? .green : .red
@@ -302,6 +313,41 @@ struct EmailInspectionView: View {
     }
 
     private func summaryBar(_ inspection: EmailInspection) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // 下面这一整块都是给开发者看的：保真指标、MIME 结构、字节数。
+            // 正常使用只需要知道"这是哪封邮件"。
+            if isDeveloperMode {
+                developerSummary(inspection)
+            }
+
+            messageLine
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    /// 当前是哪封邮件。开发者模式下多带一个内容 ID（排障时对日志用）。
+    @ViewBuilder
+    private var messageLine: some View {
+        if let message = model.currentMessage {
+            Text(
+                isDeveloperMode
+                    ? "\(message.displayTitle)　·　\(message.from)　·　id \(message.id)"
+                    : "\(message.displayTitle)　·　\(message.from)"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .textSelection(.enabled)
+        }
+    }
+
+    /// 开发者专属的指标区。
+    @ViewBuilder
+    private func developerSummary(_ inspection: EmailInspection) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             // 窄窗口下 chip 会溢出，放进横向滚动容器里
             ScrollView(.horizontal, showsIndicators: false) {
@@ -323,15 +369,6 @@ struct EmailInspectionView: View {
                 }
             }
 
-            if let message = model.currentMessage {
-                Text("\(message.displayTitle)　·　\(message.from)　·　id \(message.id)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-            }
-
             Text(inspection.fidelity.detail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -343,10 +380,6 @@ struct EmailInspectionView: View {
                     .textSelection(.enabled)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor))
     }
 
     private func segmentsTable(_ inspection: EmailInspection) -> some View {

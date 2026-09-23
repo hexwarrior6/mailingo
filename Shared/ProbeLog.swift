@@ -86,12 +86,26 @@ public final class ProbeLog: @unchecked Sendable {
         return ""
     }
 
+    /// 日志大小上限。超过就从头来过。
+    ///
+    /// 每次解码邮件都会追加十来行，长期跑下去这个文件会无上限增长。
+    /// 对正式版来说这是不可接受的（磁盘无声被吃掉），所以设一个上限：
+    /// 满了直接重开，而不是做复杂的轮转 —— 诊断日志丢掉最旧的完全可以接受。
+    private static let maxLogBytes = 2 * 1024 * 1024
+
     @discardableResult
     private static func append(_ text: String, to url: URL) -> Bool {
         let fm = FileManager.default
         do {
             try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             if !fm.fileExists(atPath: url.path) {
+                guard fm.createFile(atPath: url.path, contents: nil) else { return false }
+            }
+
+            // 超过上限就截断重开
+            if let size = try? fm.attributesOfItem(atPath: url.path)[.size] as? Int,
+               size > maxLogBytes {
+                try? fm.removeItem(at: url)
                 guard fm.createFile(atPath: url.path, contents: nil) else { return false }
             }
             let handle = try FileHandle(forWritingTo: url)

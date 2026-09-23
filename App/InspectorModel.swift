@@ -29,8 +29,14 @@ final class InspectorModel: ObservableObject {
             case .identity: IdentityTranslationEngine()
             }
         }
+    }
 
-        var isRealTranslation: Bool { self == .apple }
+    /// 当前显示的到底是不是真译文。
+    ///
+    /// 开发者模式关闭时引擎被强制成 Apple 翻译，所以恒为 true；
+    /// 界面上用它决定右侧标题写「中文译文」还是「切片后」。
+    var isShowingRealTranslation: Bool {
+        !DeveloperMode.isOn || engineChoice == .apple
     }
 
     enum LoadState {
@@ -183,11 +189,22 @@ final class InspectorModel: ObservableObject {
 
     // MARK: - 翻译
 
+    /// 开发者模式关闭时强制用正式的 Apple 翻译 ——
+    /// 「标记替换 / 原样返回」只是调试用的，不能让正常用户翻出一堆〖0〗。
+    private var effectiveEngine: TranslationEngine {
+        DeveloperMode.isOn ? engineChoice.engine : AppleTranslationEngine()
+    }
+
+    /// 开发者模式开关变化时调用：引擎的选择范围变了，需要重翻一次。
+    func developerModeDidChange() {
+        restartTranslation()
+    }
+
     func restartTranslation() {
         translationTask?.cancel()
         guard let analysis else { return }
 
-        let engine = engineChoice.engine
+        let engine = effectiveEngine
         translationTask = Task { [weak self] in
             guard let self else { return }
             await self.translate(analysis: analysis, engine: engine)
