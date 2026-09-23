@@ -3,6 +3,7 @@ import Cache
 import EmailCore
 import Foundation
 import MailIntegration
+import os
 import SwiftUI
 import TranslationCore
 
@@ -137,6 +138,20 @@ final class InspectorModel: ObservableObject {
     /// 当前正在跑的「问 Mail 选中了哪一封」的查询。
     /// 用来在发起新查询前取消旧的，避免 AppleScript 在串行队列上堆成一串。
     private var selectionQueryTask: Task<MailSelection, Error>?
+
+    /// 邮件目录的监听源。Mail 一交来新邮件就立刻去问选中项（见
+    /// `startWatchingMessagesDirectory`）。跟着 App 活到退出，不需要显式取消。
+    private var messagesWatcher: DispatchSourceFileSystemObject?
+
+    /// 跟随与载入的轻量追踪。
+    ///
+    /// 走 os_log 而不是 `ProbeLog` —— 后者每次调用都 `fsync`，高频打点会把主线程拖住。
+    /// 看的时候用 `make stream`（就是按 subsystem 过滤的 `log stream`）。
+    /// 存在的意义：闪一下这类问题全靠时序，光看代码猜不出来。
+    private let trace = Logger(subsystem: "com.zhuyuhao.Mailingo", category: "follow")
+
+    /// 上一次因为"目录有动静"而触发跟随的时间，用来限流。
+    private var lastMessagesActivity = Date.distantPast
     /// 每次翻译运行发一个令牌。取消不一定能立刻终止正在 await 的调用，
     /// 所以结果回来时要确认"我还是当前那一次"，否则旧邮件的译文会覆盖新邮件。
     private var runToken = UUID()
@@ -172,11 +187,61 @@ final class InspectorModel: ObservableObject {
     func bootstrap() async {
         // 启动时先按策略清理一次缓存，避免长期不打开设置就一直不清理
         _ = await TranslationCache.shared.purge(policy: cachePolicy)
+        startWatchingMessagesDirectory()
         refreshCapturedMessages(force: true)
         await loadMostRecent()
         // 启动时自检一次，但**不触发系统下载弹窗** ——
         // 只是把「语言包装了没」这类事实记下来，用户没要求就别打扰他。
         await runDiagnostics(allowDownloadTrigger: false)
+    }
+
+    // MARK: - 邮件目录监听
+
+    /// 目录一动就立刻去问 Mail，而不是干等下一次轮询。
+    ///
+    /// ## 为什么需要它
+    ///
+    /// 定时轮询有个绕不过去的"发现延迟"：用户点了别的邮件之后，App 最坏要等
+    /// 一整拍才知道。而这段窗口里，上一封（比如一封很大的、带一堆图的）刚好
+    /// 解析完并画了出来 —— 用户就会看到它**一闪而过**，然后才跳到正确的那封。
+    ///
+    /// 而 Mail 每把一封邮件交给扩展、扩展落盘，目录就有动静。这是"用户刚在
+    /// Mail 里动了"能拿到的**最早信号**，比定时器早得多。拿到就立刻去问一次
+    /// 选中项，把发现延迟从"最多一拍"压到"一次 AppleScript 往返"。
+    ///
+    /// 定时器仍然保留作兜底：万一某次落盘没触发目录事件，也不至于就一直不跟随。
+    private func startWatchingMessagesDirectory() {
+        let directory = SharedPaths.messages
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        // O_EVTONLY：只监听事件、不要读权限，也不会阻止卷被卸载
+        let descriptor = open(directory.path, O_EVTONLY)
+        guard descriptor >= 0 else { return }
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor,
+            eventMask: [.write, .rename, .delete],
+            queue: .main
+        )
+        source.setEventHandler { [weak self] in
+            Task { @MainActor in self?.messagesDirectoryDidChange() }
+        }
+        source.setCancelHandler { close(descriptor) }
+        source.resume()
+        messagesWatcher = source
+    }
+
+    private func messagesDirectoryDidChange() {
+        // 限流。Mail 打开一个会话时会**连着解码好几封**（实测一次能解十几封），
+        // 每封都去问一次选中项纯属浪费 —— 反正问回来的是同一个答案。
+        let now = Date()
+        guard now.timeIntervalSince(lastMessagesActivity) > 0.2 else { return }
+        lastMessagesActivity = now
+        trace.notice("邮件目录有动静 → 立刻问 Mail 选中了哪一封")
+
+        // 顺带刷新已捕获列表，不必等下一次 timer
+        refreshCapturedMessages(force: true)
+        pollMailSelection()
     }
 
     // MARK: - 载入
@@ -230,6 +295,8 @@ final class InspectorModel: ObservableObject {
 
         let token = UUID()
         loadToken = token
+
+        trace.notice("load 开始 \(messageID, privacy: .public)（已取消上一个）")
 
         let task = Task { [weak self] in
             guard let self else { return }
@@ -616,6 +683,7 @@ final class InspectorModel: ObservableObject {
         self.analysis = analysis
         self.sourceBytes = data.count
         self.state = .loaded
+        trace.notice("load 落地 \(self.currentMessage?.id ?? "?", privacy: .public) → 界面切到这一封")
 
         // 先用原样结果占位，再用引擎的结果替换
         self.inspection = EmailInspector.apply(translations: [:], to: analysis)
