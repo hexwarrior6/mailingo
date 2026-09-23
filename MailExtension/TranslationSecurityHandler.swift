@@ -89,10 +89,12 @@ final class TranslationSecurityHandler: NSObject, MEMessageSecurityHandler {
             encryptionError: nil
         )
 
+        // dismissable: false —— 不要给用户一个"点一下就消失"的横幅。
+        // 保留着才能反复点击（重新翻译、或第一次失败后重试）。
         let banner = MEDecodedMessageBanner(
             title: "翻译这封邮件",
             primaryActionTitle: "翻译",
-            dismissable: true
+            dismissable: false
         )
 
         // ② context 带上 ID —— Mail 会在用户点击时原样回传，
@@ -105,21 +107,33 @@ final class TranslationSecurityHandler: NSObject, MEMessageSecurityHandler {
         )
     }
 
-    // MARK: - 呈现我们的 UI
+    // MARK: - 呈现 UI：**一律不开窗口**
+
+    // 三条回调全部返回 nil，这是刻意的。
+    //
+    // 产品形态是「Mail 左边照常显示原文，译文出现在 Mailingo 自己的窗口里」，
+    // 所以 Mail 这边只需要把请求交出去，**不该再弹任何东西**。
+    //
+    // 早先这里返回了一个 `MEExtensionViewController`，Mail 会把它当成一个新窗口
+    // 弹出来 —— 那正是"点一下翻译就多出一个窗口"的来源；而这次交互同时把横幅
+    // 消费掉了，于是横幅也跟着消失。两个症状同一个根因。
 
     /// 用户点击**邮件头部视图里的扩展图标**时调用。
-    ///
-    /// 这条路径拿不到 context，所以只能退化成"最近捕获的那封"。
-    /// 真正的精确选择走下面的 `messageContext` 版本。
     func extensionViewController(signers messageSigners: [MEMessageSigner]) -> MEExtensionViewController? {
-        ProbeLog.shared.record("★ extensionViewController(signers:) 被调用（无 context，退化为最近一封）")
-        return ProbeViewController(reason: .headerIcon, message: MessageStore.mostRecent())
+        ProbeLog.shared.record("★ extensionViewController(signers:) 被调用（不开窗口）")
+        // 这条路径拿不到 context，只能退化成"最近捕获的那封"
+        if let message = MessageStore.mostRecent() {
+            requestTranslation(of: message, reason: "头部图标")
+        }
+        return nil
     }
 
     /// 用户点击**横幅**时调用，带 Mail 回传的 context —— 能确定是哪一封。
     func extensionViewController(messageContext context: Data) -> MEExtensionViewController? {
-        let message = resolve(context: context, reason: "extensionViewController(messageContext:)")
-        return ProbeViewController(reason: .messageContext, message: message)
+        if let message = resolve(context: context, reason: "extensionViewController(messageContext:)") {
+            requestTranslation(of: message, reason: "横幅")
+        }
+        return nil
     }
 
     /// 横幅上**主操作按钮**被点击时调用。
@@ -127,16 +141,30 @@ final class TranslationSecurityHandler: NSObject, MEMessageSecurityHandler {
         forMessageContext context: Data,
         completionHandler: @escaping (MEExtensionViewController?) -> Void
     ) {
-        let message = resolve(context: context, reason: "primaryActionClicked")
-
-        if let message {
-            // ③ 把请求写下来并唤醒容器 App —— 用户不必回 App 里手动点"获取当前邮件"
-            MessageStore.writePendingRequest(messageID: message.id)
-            openContainerApp(messageID: message.id)
+        if let message = resolve(context: context, reason: "primaryActionClicked") {
+            requestTranslation(of: message, reason: "横幅主操作")
         }
-
-        completionHandler(ProbeViewController(reason: .bannerAction, message: message))
+        // 传 nil：不呈现任何 UI，Mail 也就没有"新窗口"可开
+        completionHandler(nil)
     }
+
+    /// 把「翻译这一封」的请求交出去。
+    ///
+    /// 去重：同一次点击可能同时命中两条回调，没必要重复写请求、重复唤醒 App。
+    private func requestTranslation(of message: StoredMessage, reason: String) {
+        let now = Date()
+        if let last = lastRequest, last.id == message.id, now.timeIntervalSince(last.at) < 1.0 {
+            ProbeLog.shared.record("（\(reason)）与上一次请求重复，跳过")
+            return
+        }
+        lastRequest = (id: message.id, at: now)
+
+        MessageStore.writePendingRequest(messageID: message.id)
+        openContainerApp(messageID: message.id)
+    }
+
+    /// 上一次发出的请求，用于去重。
+    private var lastRequest: (id: String, at: Date)?
 
     // MARK: - 私有
 

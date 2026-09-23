@@ -9,7 +9,12 @@ struct MailingoApp: App {
     @StateObject private var model = InspectorModel()
 
     var body: some Scene {
-        WindowGroup("Mailingo") {
+        // 用 Window 而不是 WindowGroup：**保证只有一个窗口**。
+        // WindowGroup 在 macOS 上收到 URL（例如从 Mail 点横幅过来）时
+        // 有产生新窗口的行为，用户会看到"点一下翻译就多开一个窗口"。
+        // 产品形态是固定单窗口（将来译文侧栏是独立的 NSPanel），
+        // 所以单实例 Window 才是对的。
+        Window("Mailingo", id: "main") {
             RootView(model: model)
                 // 最小尺寸放低一些，让窗口能真的缩小；内部各区域靠
                 // VSplitView / HSplitView 自适应，不需要靠"大最小尺寸"兜底。
