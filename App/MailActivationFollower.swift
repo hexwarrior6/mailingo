@@ -143,7 +143,9 @@ final class MailActivationFollower {
         // 「被激活」有可能是用户特意去点 Mail，这时不该抢；「从隐藏恢复」则是
         // 我们自己跟着 Mail 一起藏起来之后又一起回来，必须放出来。
         if reason == .activated, !Self.isCoveredByOtherApp(window) {
-            Self.logger.notice("跟随：Mail 被激活，但我们上面没压着别的 App（只是想用 Mail）→ 不提窗")
+            // debug 级：每次切到 Mail 都会走到这里，稳态下是纯噪音。
+            // 排障时 `make stream`（带 --level debug）能看到。
+            Self.logger.debug("跟随：Mail 被激活，但我们上面没压着别的 App（只是想用 Mail）→ 不提窗")
             return
         }
 
