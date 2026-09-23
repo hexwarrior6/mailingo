@@ -208,12 +208,22 @@ make diagnose      # 地面真相：os_log + appex 是否被拉起 + 注册情�
 改图标只需要一张**满幅方形的画稿**（1024 或更大，别自己画圆角）：
 
 ```sh
-make appicon ART=Design/AppIcon.png
+make appicon-project      # 用仓库里的画稿重新生成（等价于下面这条）
+make appicon ART=Design/AppIcon.png SHRINK=88
 make gen && make build
 ```
 
 `Design/AppIcon.png` 是当前画稿的源文件。`App/Resources/Assets.xcassets/` 里的
 PNG 是**生成物**，别手工编辑——跑 `make appicon` 会整个覆盖。
+
+**为什么要 `SHRINK=88`。** App 图标的可见形状只占画布 824/1024，画稿四周那
+100px 天然在形状之外。当前画稿主体画得很满（信封宽占画面 73%），套上蒙版后
+信封到图标边缘只剩 37px，观感上像被切了。缩到 88% 后间距回到 81px，接近原生
+图标的呼吸感。作为对照，Apple 邮件图标的信封只占高度的 44.5%、左右各留 124px。
+
+`SHRINK` 会把画稿缩到画布中央，四周用**镜像反射**补齐背景（不是把最外圈像素
+往外拉——那样对中心发光的画稿会围出一道亮环）。主体本来就留白充足的画稿不需要
+这个参数，省略即 100。
 
 **为什么要脚本，不能直接丢进 Assets.xcassets：**
 

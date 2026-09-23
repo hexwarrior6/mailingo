@@ -63,20 +63,51 @@ let maskSources = [
 // MARK: - 命令行
 
 let args = Array(CommandLine.arguments.dropFirst())
-guard let artPath = args.first(where: { !$0.hasPrefix("--") }) else {
-    FileHandle.standardError.write("""
-    用法：swift Scripts/make-appicon.swift <画稿.png> [--flat] [--no-preview]
 
-      画稿.png   1024×1024 的方形图片（不满 1024 也能跑，会被放大；
-                 非正方形会居中裁成正方形并给出警告）
-      --flat      不烘焙投影（默认烘焙，与 Apple 自带图标一致）
-      --no-preview 不生成小尺寸/明暗对照图
+/// 顺序解析。有带值的选项（--shrink），所以不能简单按前缀找位置参数。
+var artPath: String?
+var bakeShadow = true
+var makePreview = true
+var shrinkPercent = 100.0
+var i = 0
+while i < args.count {
+    let a = args[i]
+    switch a {
+    case "--flat":        bakeShadow = false
+    case "--no-preview":  makePreview = false
+    case "--shrink":
+        guard i + 1 < args.count, let v = Double(args[i + 1]), v > 0, v <= 100 else {
+            FileHandle.standardError.write("❌ --shrink 需要一个 1…100 的数值\n".data(using: .utf8)!)
+            exit(2)
+        }
+        shrinkPercent = v
+        i += 1
+    default:
+        if a.hasPrefix("--") {
+            FileHandle.standardError.write("❌ 不认识的选项：\(a)\n".data(using: .utf8)!)
+            exit(2)
+        }
+        artPath = a
+    }
+    i += 1
+}
+
+guard let artPath else {
+    FileHandle.standardError.write("""
+    用法：swift Scripts/make-appicon.swift <画稿.png> [--shrink 100] [--flat] [--no-preview]
+
+      画稿.png      方形图片（1024 或更大最好；非正方形会居中裁成正方形）
+      --shrink N    把画稿缩到画布的 N% 并居中，四周用边缘延展补背景。
+                    默认 100（不动）。**主体画得太满时用这个还呼吸感** ——
+                    App 图标的形状只占画布 824/1024，四周 100px 天然看不见，
+                    所以主体占满画布的画稿套上蒙版后会显得贴边。
+                    实测本项目的画稿用 88 比较合适。
+      --flat        不烘焙投影（默认烘焙，与 Apple 自带图标一致）
+      --no-preview  不生成小尺寸/明暗对照图
 
     """.data(using: .utf8)!)
     exit(2)
 }
-let bakeShadow = !args.contains("--flat")
-let makePreview = !args.contains("--no-preview")
 
 /// 仓库根目录 = 本脚本所在目录的上一级。这样从任何目录跑都写对地方。
 let scriptURL = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
@@ -187,6 +218,45 @@ func fallbackMask() -> [UInt8] {
     return mask
 }
 
+/// 把画稿按百分比缩到画布中央，四周用**边缘延展**补齐。
+///
+/// 为什么需要这一步：App 图标的形状只占画布的 824/1024，画稿四周那 100px
+/// 天然在形状之外。如果画稿主体本来就画得很满（AI 出图常常如此），套上蒙版
+/// 后主体边缘就只剩很窄一条背景，观感上像"被切了"。
+///
+/// 缩完之后四周会空出来，不能留透明。补背景用**镜像**（把边缘往里反射），
+/// 不用"把最外圈像素往外拉"的那种延展 —— 本项目的画稿是**中心发光**，
+/// 亮度从中心往四周衰减，延展会把边缘那圈亮度直接拉出去，围出一道比中心
+/// 还亮的蓝环；镜像则让亮度继续朝外衰减，接缝看不出来。
+func shrunkToCanvas(_ image: CGImage, percent: Double) -> [UInt8]? {
+    guard percent < 100 else { return rgbaBuffer(image, size: canvasSize) }
+    let inner = max(1, Int((Double(canvasSize) * percent / 100).rounded()))
+    guard let small = rgbaBuffer(image, size: inner) else { return nil }
+    let offset = (canvasSize - inner) / 2
+
+    /// 把画布坐标反射回 [0, inner) 之内。周期 2·inner。
+    func reflect(_ v: Int) -> Int {
+        var t = v % (2 * inner)
+        if t < 0 { t += 2 * inner }
+        return t < inner ? t : 2 * inner - 1 - t
+    }
+
+    var out = [UInt8](repeating: 0, count: canvasSize * canvasSize * 4)
+    for y in 0..<canvasSize {
+        let sy = reflect(y - offset)
+        for x in 0..<canvasSize {
+            let sx = reflect(x - offset)
+            let src = (sy * inner + sx) * 4
+            let dst = (y * canvasSize + x) * 4
+            out[dst]     = small[src]
+            out[dst + 1] = small[src + 1]
+            out[dst + 2] = small[src + 2]
+            out[dst + 3] = small[src + 3]
+        }
+    }
+    return out
+}
+
 // MARK: - 主流程
 
 print("== Mailingo App 图标 ==")
@@ -206,9 +276,12 @@ if artImage.width < canvasSize {
 }
 
 let squared = centerCropped(artImage)
-guard var art = rgbaBuffer(squared, size: canvasSize) else {
+guard var art = shrunkToCanvas(squared, percent: shrinkPercent) else {
     FileHandle.standardError.write("❌ 无法把画稿转成像素缓冲\n".data(using: .utf8)!)
     exit(1)
+}
+if shrinkPercent < 100 {
+    print("· 画稿已缩到 \(Int(shrinkPercent))% 并居中，四周用镜像反射补背景")
 }
 
 // ② 取官方形状
