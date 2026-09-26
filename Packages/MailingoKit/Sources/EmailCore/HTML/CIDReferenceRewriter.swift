@@ -65,13 +65,14 @@ public enum CIDReferenceRewriter {
     ///
     /// 用这个集合而不是 `.alphanumerics`：后者会把 `-` `.` `_` `~` 也编码掉，
     /// 虽然合法但把 URL 弄得很难看（`pic-1` 变成 `pic%2D1`），也没必要。
-    private static let unreserved = CharacterSet.alphanumerics
+    /// `ImageTranslationOverlay` 的角标 href 也用同一套编码，保证可互相解析。
+    public static let unreservedCharacters = CharacterSet.alphanumerics
         .union(CharacterSet(charactersIn: "-._~"))
 
     /// 生成自定义 scheme 的 URL 字符串。
     public static func urlString(forContentID cid: String) -> String {
         // Content-ID 里经常有 `@`、`/`、`?` 这类必须编码的字符
-        let encoded = cid.addingPercentEncoding(withAllowedCharacters: unreserved) ?? cid
+        let encoded = cid.addingPercentEncoding(withAllowedCharacters: unreservedCharacters) ?? cid
         return "\(scheme)://\(encoded)"
     }
 

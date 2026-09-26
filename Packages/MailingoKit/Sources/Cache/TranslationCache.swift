@@ -151,6 +151,14 @@ public actor TranslationCache {
             .joined()
     }
 
+    /// 二进制内容（如图片）的指纹 —— 图片翻译缓存按"图 + 语言 + 厂商"键控。
+    public static func contentHash(of data: Data) -> String {
+        SHA256.hash(data: data)
+            .prefix(16)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
     // MARK: - 读
 
     /// 查缓存。`sourceHash` 必须与写入时一致才算命中。

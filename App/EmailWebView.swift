@@ -1,7 +1,9 @@
 import SwiftUI
 import WebKit
+import os
 
 import EmailCore
+import TranslationCore
 
 /// 渲染一封邮件的 HTML。
 ///
@@ -20,14 +22,28 @@ import EmailCore
 /// 有了这一条就不需要再去 HTML 里"剥离 `<script>`"了 —— 那是重复的防线。
 struct EmailWebView: NSViewRepresentable {
 
+    /// 图片翻译的呈现层：每张内联图的角标状态、已翻译的图源、点击回调。
+    ///
+    /// 原文窗格传 nil —— 角标只出现在译文一侧。
+    struct ImageTranslationPresentation {
+        /// Content-ID → 角标形态（决定按钮文案：译 / … / 原）。
+        var badges: [String: ImageTranslationOverlay.Badge]
+        /// Content-ID → 渲染好的译文图（scheme handler 用它替换原图字节）。
+        var results: [String: TranslatedImage]
+        /// 用户点了角标：参数是 Content-ID。
+        var onAction: (String) -> Void
+    }
+
     let html: String
     /// MIME 里解出来的内嵌资源（`Content-ID` → 字节）。
     let inlineResources: [String: InlineResource]
     /// 是否允许加载外部（http/https）内容。
     let allowsRemoteContent: Bool
+    /// 图片翻译呈现层（nil = 不显示任何角标）。
+    var imageTranslation: ImageTranslationPresentation?
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(inlineResources: inlineResources)
+        Coordinator(inlineResources: inlineResources, presentation: imageTranslation)
     }
 
     func makeNSView(context: Context) -> WKWebView {
@@ -35,6 +51,8 @@ struct EmailWebView: NSViewRepresentable {
         // 邮件里的脚本一律不执行。这一条就是脚本防护，不需要再手动剥 <script>。
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
         configuration.setURLSchemeHandler(context.coordinator, forURLScheme: CIDReferenceRewriter.scheme)
+        // 译文图的图源 scheme —— 与原图不同 URL，避免 WebKit 缓存返回旧图
+        configuration.setURLSchemeHandler(context.coordinator, forURLScheme: ImageTranslationOverlay.outputScheme)
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
@@ -48,7 +66,8 @@ struct EmailWebView: NSViewRepresentable {
         context.coordinator.update(
             html: html,
             inlineResources: inlineResources,
-            allowsRemoteContent: allowsRemoteContent
+            allowsRemoteContent: allowsRemoteContent,
+            presentation: imageTranslation
         )
     }
 
@@ -56,12 +75,16 @@ struct EmailWebView: NSViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKURLSchemeHandler {
 
+        private static let imgTrace = Logger(subsystem: "com.zhuyuhao.Mailingo", category: "img")
+
         /// 连接阶段就设成 nil，让 `scheme` 与 `LocalizedError` 的说法保持一致
         private static let blockRuleListIdentifier = "com.zhuyuhao.Mailingo.block-remote-content"
         /// 远程内容拦截规则。编译一次后复用。
         private static var blockRuleList: WKContentRuleList?
 
         private var inlineResources: [String: InlineResource]
+        /// 图片翻译的呈现层：角标决定按钮文案，results 决定 cid 取哪份图源。
+        private var presentation: ImageTranslationPresentation?
         private weak var webView: WKWebView?
 
         private var currentHTML = ""
@@ -70,17 +93,24 @@ struct EmailWebView: NSViewRepresentable {
         /// 拦截规则是否**已经真正挂到 controller 上**（注意：不是"编译好了"）。
         private var isBlockingInPlace = false
 
-        init(inlineResources: [String: InlineResource]) {
+        init(inlineResources: [String: InlineResource], presentation: ImageTranslationPresentation?) {
             self.inlineResources = inlineResources
+            self.presentation = presentation
         }
 
         func attach(_ webView: WKWebView) {
             self.webView = webView
         }
 
-        func update(html: String, inlineResources: [String: InlineResource], allowsRemoteContent: Bool) {
+        func update(
+            html: String,
+            inlineResources: [String: InlineResource],
+            allowsRemoteContent: Bool,
+            presentation: ImageTranslationPresentation?
+        ) {
             self.currentHTML = html
             self.inlineResources = inlineResources
+            self.presentation = presentation
 
             if appliedRemotePolicy != allowsRemoteContent {
                 appliedRemotePolicy = allowsRemoteContent
@@ -105,7 +135,10 @@ struct EmailWebView: NSViewRepresentable {
             // 宁可多等一个异步回合，也不能先放请求出去。
             if appliedRemotePolicy == false, !isBlockingInPlace { return }
 
-            let rendered = CIDReferenceRewriter.rewrite(currentHTML)
+            let rendered = ImageTranslationOverlay.inject(
+                into: CIDReferenceRewriter.rewrite(currentHTML),
+                badges: presentation?.badges ?? [:]
+            )
             guard loadedRenderedHTML != rendered else { return }
             loadedRenderedHTML = rendered
             webView.loadHTMLString(rendered, baseURL: nil)
@@ -172,8 +205,25 @@ struct EmailWebView: NSViewRepresentable {
         // MARK: WKURLSchemeHandler —— 把 cid: 变成真实图片
 
         func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
-            guard let url = urlSchemeTask.request.url,
-                  let cid = CIDReferenceRewriter.contentID(from: url) else {
+            guard let url = urlSchemeTask.request.url else {
+                urlSchemeTask.didFailWithError(URLError(.badURL))
+                return
+            }
+
+            // 译文图源（mailingo-imgout://）：只有翻译完成后才会有请求，
+            // 供给渲染好的译文整图
+            if url.scheme == ImageTranslationOverlay.outputScheme {
+                guard let cid = ImageTranslationOverlay.contentID(fromOutputURL: url),
+                      let translated = presentation?.results[cid] else {
+                    urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist))
+                    return
+                }
+                Self.imgTrace.notice("图源 cid=\(cid, privacy: .public) → 译文图 \(translated.imageData.count) 字节")
+                serve(urlSchemeTask, url: url, mimeType: translated.mimeType, data: translated.imageData)
+                return
+            }
+
+            guard let cid = CIDReferenceRewriter.contentID(from: url) else {
                 urlSchemeTask.didFailWithError(URLError(.badURL))
                 return
             }
@@ -184,14 +234,19 @@ struct EmailWebView: NSViewRepresentable {
                 return
             }
 
+            Self.imgTrace.notice("图源 cid=\(cid, privacy: .public) → 原图 \(resource.data.count) 字节")
+            serve(urlSchemeTask, url: url, mimeType: resource.mimeType, data: resource.data)
+        }
+
+        private func serve(_ urlSchemeTask: WKURLSchemeTask, url: URL, mimeType: String, data: Data) {
             let response = URLResponse(
                 url: url,
-                mimeType: resource.mimeType,
-                expectedContentLength: resource.data.count,
+                mimeType: mimeType,
+                expectedContentLength: data.count,
                 textEncodingName: nil
             )
             urlSchemeTask.didReceive(response)
-            urlSchemeTask.didReceive(resource.data)
+            urlSchemeTask.didReceive(data)
             urlSchemeTask.didFinish()
         }
 
@@ -202,6 +257,8 @@ struct EmailWebView: NSViewRepresentable {
         // MARK: WKNavigationDelegate
 
         /// 邮件里的链接一律交给默认浏览器打开，绝不在这个小窗格里导航走。
+        /// 图片翻译的角标（`mailingo-imgtrans://`）是唯一的例外 ——
+        /// 它不是链接，是按钮：拦下来交给上层触发翻译/切回。
         func webView(
             _ webView: WKWebView,
             decidePolicyFor navigationAction: WKNavigationAction,
@@ -210,6 +267,13 @@ struct EmailWebView: NSViewRepresentable {
             // 首次加载（loadHTMLString）没有 navigationType .linkActivated
             if navigationAction.navigationType == .linkActivated,
                let url = navigationAction.request.url {
+                if url.scheme == ImageTranslationOverlay.scheme {
+                    decisionHandler(.cancel)
+                    if let cid = ImageTranslationOverlay.actionID(from: url) {
+                        presentation?.onAction(cid)
+                    }
+                    return
+                }
                 if url.scheme == CIDReferenceRewriter.scheme {
                     decisionHandler(.allow)
                 } else {

@@ -14,6 +14,8 @@ struct PreviewPane: View {
     /// 是否允许加载外部图片（默认关闭，和 Mail 行为一致）。
     let allowsRemoteContent: Bool
     var accent: Color = .secondary
+    /// 图片翻译呈现层（角标 + 译文图源切换）。nil = 不显示角标。
+    var imageTranslation: EmailWebView.ImageTranslationPresentation?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -25,7 +27,8 @@ struct PreviewPane: View {
             EmailWebView(
                 html: html,
                 inlineResources: inlineResources,
-                allowsRemoteContent: allowsRemoteContent
+                allowsRemoteContent: allowsRemoteContent,
+                imageTranslation: imageTranslation
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 6)

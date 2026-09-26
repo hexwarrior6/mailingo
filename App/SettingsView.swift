@@ -7,130 +7,212 @@ import TranslationCore
 
 /// 设置窗口（菜单栏「Mailingo → 设置…」，⌘,）。
 ///
-/// 分组：跟 Mail 联动、翻译语言包、翻译缓存 ——
-/// 都是"需要给用户可调"的地方。
+/// macOS 惯例：工具栏标签页分组 —— 通用 / 翻译 / 语言包 / 缓存，
+/// 每页只放一组设置。曾经全部堆在一页里，窗口高得离谱，翻找困难。
 struct SettingsView: View {
 
-    /// 跟 Mail 联动的那几项要和主窗口共用状态，所以拿的是同一个模型。
+    /// 各页要和主窗口共用状态，所以拿的是同一个模型。
     @ObservedObject var model: InspectorModel
 
-    @AppStorage(InspectorModel.cacheMaxAgeDaysKey)
-    private var maxAgeDays = CachePolicy.default.maxAgeDays
+    var body: some View {
+        TabView {
+            MailLinkageSettingsView(model: model)
+                .tabItem { Label("通用", systemImage: "gearshape") }
 
-    @AppStorage(InspectorModel.cacheMaxSizeMBKey)
-    private var maxSizeMB = CachePolicy.default.maxSizeMB
+            TranslationSettingsView(model: model)
+                .tabItem { Label("翻译", systemImage: "globe") }
 
-    @State private var statistics = CacheStatistics()
-    @State private var message: String?
+            LanguagePacksSettingsView(model: model)
+                .tabItem { Label("语言包", systemImage: "square.and.arrow.down") }
+
+            CacheSettingsView(model: model)
+                .tabItem { Label("缓存", systemImage: "internaldrive") }
+        }
+        .frame(width: 480)
+    }
+}
+
+// MARK: - 通用（跟 Mail 联动）
+
+/// Mail 那边收摊了，我们也跟着收。
+private struct MailLinkageSettingsView: View {
+
+    @ObservedObject var model: InspectorModel
 
     var body: some View {
         Form {
-            mailLinkageSection
-            languagePacksSection
-
             Section {
-                ageRow
-                sizeRow
-            } header: {
-                Text("翻译缓存")
-            } footer: {
-                Text("同一封邮件只翻译一次。缓存按「最近使用时间」淘汰 —— 常用的不会因为放得久就被删。")
+                Toggle("跟随 Mail 一起显示 / 隐藏", isOn: $followsMailActivation)
+                Text("Mail 被隐藏（右键 Dock 图标 → 隐藏，或 ⌘H）→ 我们也隐藏；"
+                     + "Mail 重新显示 → 我们也显示并提到最前。\n"
+                     + "提窗时**不抢键盘焦点**，Mail 仍是活动 App，照常能打字滚动。\n"
+                     + "只跟随「隐藏」，不跟随「切到别的 App」—— 后者会把窗口在你查资料时收走。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
+                    .fixedSize(horizontal: false, vertical: true)
 
-            Section {
-                LabeledContent("当前占用") {
-                    Text(usageDescription)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
+                Toggle("Mail 关掉阅读窗口时，同时关闭 Mailingo", isOn: $model.closesWithMail)
+                    .disabled(!model.followsMailSelection)
 
-                HStack(spacing: 10) {
-                    Button("立即清理") {
-                        Task { await purgeNow() }
-                    }
-                    Button("清空全部缓存", role: .destructive) {
-                        Task { await removeAll() }
-                    }
-                    Spacer()
-                }
+                Text(model.followsMailSelection
+                     ? "窗口关掉后 App 会一并退出，下次从 Mail 的横幅重新唤起。"
+                     : "需要先在主窗口打开「跟随 Mail」—— 检测信号来自它的轮询。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-                if let message {
-                    Text(message)
+                // 只在上面那个开关打开时才出现 —— 关了它，这一项没有意义
+                if model.closesWithMail {
+                    Toggle("立即关闭，不等确认", isOn: $model.closesWithMailImmediately)
+                        .disabled(!model.followsMailSelection)
+
+                    Text(model.closesWithMailImmediately
+                         ? "识别到 Mail 的阅读窗口没了就立刻关。万一 Mail 一时报不出窗口，Mailingo 会当场消失。"
+                         : "默认会连续确认约 1.5 秒，避免 Mail 一瞬间报不出窗口就把 Mailingo 收掉。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            } header: {
+                Text("跟 Mail 联动")
             }
         }
         .formStyle(.grouped)
-        .frame(width: 480)
-        .fixedSize(horizontal: false, vertical: true)
-        .task { await refresh() }
-        .task { await refreshPacks() }
-        .onChange(of: model.translationStatus) { oldValue, newValue in
-            // 行数据是快照，而语言包还有一条**不经过本面板**的安装途径：
-            // 主窗口里翻译时弹的系统下载框。所以每次翻译从「进行中」落回
-            // 「空闲」（那可能刚装好一个包），就把整张表重新对一遍。
-            if case .running = oldValue, case .idle = newValue {
-                Task { await refreshPacks() }
-            }
-        }
-        .onChange(of: maxAgeDays) { _, newValue in
-            if newValue < 0 { maxAgeDays = 0 }
-        }
-        .onChange(of: maxSizeMB) { _, newValue in
-            if newValue < 0 { maxSizeMB = 0 }
-        }
     }
 
-    // MARK: - 跟 Mail 联动
-
-    /// Mail 那边收摊了，我们也跟着收。
-    ///
-    /// 检测信号来自「跟随 Mail」的轮询 —— Mail 的 AppleScript 会区分
-    /// 「没有阅读窗口」和「没选中邮件」，前者正是我们要的。所以这个开关
-    /// **依赖「跟随 Mail」**，没开跟随就没有信号，只能置灰。
     @AppStorage(MailActivationFollower.enabledKey)
     private var followsMailActivation = false
+}
 
-    private var mailLinkageSection: some View {
-        Section {
-            Toggle("跟随 Mail 一起显示 / 隐藏", isOn: $followsMailActivation)
-            Text("Mail 被隐藏（右键 Dock 图标 → 隐藏，或 ⌘H）→ 我们也隐藏；"
-                 + "Mail 重新显示 → 我们也显示并提到最前。\n"
-                 + "提窗时**不抢键盘焦点**，Mail 仍是活动 App，照常能打字滚动。\n"
-                 + "只跟随「隐藏」，不跟随「切到别的 App」—— 后者会把窗口在你查资料时收走。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+// MARK: - 翻译（引擎 / 大模型 / 图片翻译）
 
-            Toggle("Mail 关掉阅读窗口时，同时关闭 Mailingo", isOn: $model.closesWithMail)
-                .disabled(!model.followsMailSelection)
+private struct TranslationSettingsView: View {
 
-            Text(model.followsMailSelection
-                 ? "窗口关掉后 App 会一并退出，下次从 Mail 的横幅重新唤起。"
-                 : "需要先在主窗口打开「跟随 Mail」—— 检测信号来自它的轮询。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    @ObservedObject var model: InspectorModel
 
-            // 只在上面那个开关打开时才出现 —— 关了它，这一项没有意义
-            if model.closesWithMail {
-                Toggle("立即关闭，不等确认", isOn: $model.closesWithMailImmediately)
-                    .disabled(!model.followsMailSelection)
-
-                Text(model.closesWithMailImmediately
-                     ? "识别到 Mail 的阅读窗口没了就立刻关。万一 Mail 一时报不出窗口，Mailingo 会当场消失。"
-                     : "默认会连续确认约 1.5 秒，避免 Mail 一瞬间报不出窗口就把 Mailingo 收掉。")
+    var body: some View {
+        Form {
+            Section {
+                Picker("翻译引擎", selection: $model.translationEngineChoice) {
+                    ForEach(InspectorModel.TranslationEngineChoice.allCases) { choice in
+                        Text(choice.label).tag(choice)
+                    }
+                }
+            } header: {
+                Text("翻译引擎")
+            } footer: {
+                Text("「大模型」需要先在下方填好 API Key。缓存按引擎自动隔离 —— 换引擎不会互相覆盖。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-        } header: {
-            Text("跟 Mail 联动")
+
+            llmSection
+            imageTranslationSection
+        }
+        .formStyle(.grouped)
+        .task {
+            // 已存的 Key 回显到输入框（SecureField 不回显会让用户以为没存过）
+            llmAPIKeyDraft = KeychainStore.mailingo.get(InspectorModel.llmAPIKeyAccount) ?? ""
+            imgtransSecretKeyDraft = KeychainStore.mailingo.get(InspectorModel.imgtransSecretKeyAccount) ?? ""
         }
     }
 
-    // MARK: - 翻译语言包
+    // MARK: 大模型翻译
+
+    /// Base URL / 模型存 UserDefaults（非密钥）；Key 存钥匙串。
+    /// 字段留空时 InspectorModel 会回退到 DeepSeek 官方模板 ——
+    /// 所以用户真正必须填的只有一把 Key。
+    @AppStorage(InspectorModel.llmBaseURLKey) private var llmBaseURL = ""
+    @AppStorage(InspectorModel.llmModelKey) private var llmModel = ""
+    @State private var llmAPIKeyDraft = ""
+    @State private var llmMessage: String?
+    @State private var isTestingConnection = false
+
+    private var llmSection: some View {
+        Section {
+            TextField("Base URL", text: $llmBaseURL, prompt: Text("留空默认 https://api.deepseek.com"))
+                .autocorrectionDisabled()
+            TextField("模型", text: $llmModel, prompt: Text("留空默认 deepseek-flash"))
+                .autocorrectionDisabled()
+            SecureField("API Key", text: $llmAPIKeyDraft, prompt: Text("sk-xxxxxxxxxxxxxxxxxxxxxxxx"))
+                .onChange(of: llmAPIKeyDraft) { _, newValue in
+                    KeychainStore.mailingo.set(newValue, for: InspectorModel.llmAPIKeyAccount)
+                }
+
+            HStack(spacing: 10) {
+                Button("测试连接") {
+                    Task { await testLLMConnection() }
+                }
+                .disabled(isTestingConnection)
+                if isTestingConnection {
+                    ProgressView().controlSize(.small)
+                }
+                Spacer()
+            }
+
+            if let llmMessage {
+                Text(llmMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        } header: {
+            Text("大模型翻译")
+        } footer: {
+            Text("任何 OpenAI 兼容接口都能接。两个字段都留空 = 默认走 DeepSeek 官方（https://api.deepseek.com + deepseek-flash），通常只需要填 API Key。选用「大模型」引擎后，邮件正文会发送给所配置的服务商；API Key 只存在本机钥匙串。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func testLLMConnection() async {
+        isTestingConnection = true
+        defer { isTestingConnection = false }
+        do {
+            let engine = LLMTranslationEngine(configuration: model.llmConfiguration)
+            let reply = try await engine.verifyConnection()
+            llmMessage = "✅ 连接成功 —— 模型回复：\(reply)"
+        } catch {
+            llmMessage = "❌ 连接失败：\((error as? TranslationEngineError)?.description ?? error.localizedDescription)"
+        }
+    }
+
+    // MARK: 图片翻译（腾讯云）
+
+    /// SecretId 存 UserDefaults、SecretKey 存钥匙串。
+    /// 都没配时主界面里图片角标点了会提示去设置 —— 所以这里的字段允许先空着。
+    @AppStorage(InspectorModel.imgtransSecretIDKey) private var imgtransSecretID = ""
+    @State private var imgtransSecretKeyDraft = ""
+    @AppStorage(InspectorModel.autoTranslateImagesKey) private var autoTranslateImages = false
+
+    private var imageTranslationSection: some View {
+        Section {
+            TextField("SecretId", text: $imgtransSecretID, prompt: Text("AKIDxxxxxxxxxxxxxxxxxxxxxxxx"))
+                .autocorrectionDisabled()
+            SecureField("SecretKey", text: $imgtransSecretKeyDraft, prompt: Text("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+                .onChange(of: imgtransSecretKeyDraft) { _, newValue in
+                    // 裁掉粘贴带进来的空白 —— 多一个换行签名就必挂
+                    KeychainStore.mailingo.set(
+                        newValue.trimmingCharacters(in: .whitespacesAndNewlines),
+                        for: InspectorModel.imgtransSecretKeyAccount
+                    )
+                }
+            Toggle("图片自动翻译（默认手动点图片右下角的「译」）", isOn: $autoTranslateImages)
+        } header: {
+            Text("图片翻译（腾讯云）")
+        } footer: {
+            Text("用腾讯云「端到端图片翻译 lite」：图中文字识别、翻译并渲染回整图。SecretId / SecretKey 在腾讯云控制台「访问管理 → API 密钥」里创建，粘贴时首尾的空格换行会自动裁掉；每月有免费额度，超出按次计费。打开自动翻译后，每封邮件的内联图片会自动逐张翻译（接口限频 1 次/秒）。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: - 语言包
+
+/// 系统语言包管理：逐语言显示安装状态，支持下载；删除没有系统接口，
+/// 只能跳转系统设置（见 openSystemLanguageSettings）。
+private struct LanguagePacksSettingsView: View {
+
+    @ObservedObject var model: InspectorModel
 
     /// 一行 = 一个系统支持的语言 + 它的安装状态。
     private struct LanguageRow: Identifiable {
@@ -144,16 +226,24 @@ struct SettingsView: View {
     @State private var downloadingID: String?
     @State private var packsMessage: String?
 
-    private var languagePacksSection: some View {
-        Section {
+    var body: some View {
+        VStack(spacing: 12) {
             if languageRows.isEmpty {
-                HStack {
+                VStack {
                     Spacer()
                     ProgressView().controlSize(.small)
                     Spacer()
                 }
+                .frame(maxWidth: .infinity, minHeight: 200)
             } else {
-                ForEach(languageRows) { packRow($0) }
+                // 21 个语言一行行排下去会把窗口撑到一两千点高 —— 限高滚动
+                ScrollView {
+                    VStack(spacing: 2) {
+                        ForEach(languageRows) { packRow($0) }
+                    }
+                    .padding(.horizontal, 12)
+                }
+                .frame(minHeight: 200, maxHeight: 430)
             }
 
             HStack(spacing: 10) {
@@ -166,18 +256,27 @@ struct SettingsView: View {
 
                 Spacer()
             }
+            .padding(.horizontal, 12)
 
             if let packsMessage {
                 Text(packsMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
             }
-        } header: {
-            Text("翻译语言包")
-        } footer: {
-            Text("语言包由 macOS 统一管理：下载会弹出系统确认框（需要主窗口开着）；翻译时选了没装的语言也会触发下载。删除没有系统接口，只能在系统设置的「语言与地区」里进行。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 12)
+        .frame(width: 480)
+        .task { await refreshPacks() }
+        .onChange(of: model.translationStatus) { oldValue, newValue in
+            // 行数据是快照，而语言包还有一条**不经过本面板**的安装途径：
+            // 主窗口里翻译时弹的系统下载框。所以每次翻译从「进行中」落回
+            // 「空闲」（那可能刚装好一个包），就把整张表重新对一遍。
+            if case .running = oldValue, case .idle = newValue {
+                Task { await refreshPacks() }
+            }
         }
     }
 
@@ -265,8 +364,71 @@ struct SettingsView: View {
         if let url, NSWorkspace.shared.open(url) { return }
         _ = NSWorkspace.shared.open(URL(string: "x-apple.systempreferences://")!)
     }
+}
 
-    // MARK: - 清理规则
+// MARK: - 缓存
+
+private struct CacheSettingsView: View {
+
+    @ObservedObject var model: InspectorModel
+
+    @AppStorage(InspectorModel.cacheMaxAgeDaysKey)
+    private var maxAgeDays = CachePolicy.default.maxAgeDays
+
+    @AppStorage(InspectorModel.cacheMaxSizeMBKey)
+    private var maxSizeMB = CachePolicy.default.maxSizeMB
+
+    @State private var statistics = CacheStatistics()
+    @State private var message: String?
+
+    var body: some View {
+        Form {
+            Section {
+                ageRow
+                sizeRow
+            } header: {
+                Text("清理规则")
+            } footer: {
+                Text("同一封邮件只翻译一次。缓存按「最近使用时间」淘汰 —— 常用的不会因为放得久就被删。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                LabeledContent("当前占用") {
+                    Text(usageDescription)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 10) {
+                    Button("立即清理") {
+                        Task { await purgeNow() }
+                    }
+                    Button("清空全部缓存", role: .destructive) {
+                        Task { await removeAll() }
+                    }
+                    Spacer()
+                }
+
+                if let message {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("占用与清理")
+            }
+        }
+        .formStyle(.grouped)
+        .task { await refresh() }
+        .onChange(of: maxAgeDays) { _, newValue in
+            if newValue < 0 { maxAgeDays = 0 }
+        }
+        .onChange(of: maxSizeMB) { _, newValue in
+            if newValue < 0 { maxSizeMB = 0 }
+        }
+    }
 
     private var ageRow: some View {
         LabeledContent("保留天数") {
@@ -301,8 +463,6 @@ struct SettingsView: View {
     private var usageDescription: String {
         String(format: "%.1f MB · %d 条", statistics.totalMegabytes, statistics.entryCount)
     }
-
-    // MARK: - 动作
 
     private func refresh() async {
         statistics = await TranslationCache.shared.statistics()

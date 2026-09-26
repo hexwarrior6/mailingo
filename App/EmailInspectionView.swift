@@ -500,7 +500,32 @@ struct EmailInspectionView: View {
             html: inspection.splicedHTML,
             inlineResources: inspection.decoded.inlineResources,
             allowsRemoteContent: allowsRemoteContent,
-            accent: inspection.fidelity.nonTextBytesIdentical ? .green : .red
+            accent: inspection.fidelity.nonTextBytesIdentical ? .green : .red,
+            imageTranslation: imageTranslationPresentation(for: inspection)
+        )
+    }
+
+    /// 图片翻译的呈现层：**每张可翻的内联图都应有角标** ——
+    /// 未翻译 = 「译」（idle 的图不在状态字典里，必须先铺上默认角标），
+    /// 翻译中 = 「…」，已翻译 = 「原」（点它切回原图），失败 = 「译」可重试。
+    private func imageTranslationPresentation(for inspection: EmailInspection) -> EmailWebView.ImageTranslationPresentation {
+        var badges: [String: ImageTranslationOverlay.Badge] = [:]
+        for (cid, resource) in inspection.decoded.inlineResources {
+            let mime = resource.mimeType.lowercased()
+            guard mime.hasPrefix("image/"), !mime.contains("gif") else { continue }
+            badges[cid] = .translate
+        }
+        for (cid, state) in model.imageTranslations {
+            switch state {
+            case .running: badges[cid] = .busy
+            case .translated: badges[cid] = .restore
+            case .failed: badges[cid] = .translate
+            }
+        }
+        return EmailWebView.ImageTranslationPresentation(
+            badges: badges,
+            results: model.translatedImageResults,
+            onAction: { cid in model.imageAction(for: cid) }
         )
     }
 

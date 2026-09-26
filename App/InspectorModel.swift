@@ -119,6 +119,200 @@ final class InspectorModel: ObservableObject {
         }
     }
 
+    // MARK: 翻译引擎选择（用户级）
+
+    /// 正式翻译引擎。开发者模式的 marker/identity 三件套不在这里 ——
+    /// 那是调试用的，见 `EngineChoice`。
+    enum TranslationEngineChoice: String, CaseIterable, Identifiable {
+        case apple
+        case llm
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .apple: "Apple 系统翻译"
+            case .llm: "大模型"
+            }
+        }
+    }
+
+    /// 持久化 —— 长期偏好。
+    @Published var translationEngineChoice: TranslationEngineChoice = {
+        let raw = UserDefaults.standard.string(forKey: "translation.engine")
+        return raw.flatMap(TranslationEngineChoice.init(rawValue:)) ?? .apple
+    }() {
+        didSet {
+            guard oldValue != translationEngineChoice else { return }
+            UserDefaults.standard.set(translationEngineChoice.rawValue, forKey: Self.translationEngineChoiceKey)
+            restartTranslation()
+        }
+    }
+
+    static let translationEngineChoiceKey = "translation.engine"
+
+    /// 大模型引擎的连接配置，每次访问现读 —— 设置里改字段即刻对下一次翻译生效，
+    /// 不需要任何"应用"动作。Key 走钥匙串，其余走 UserDefaults。
+    ///
+    /// **留空即 DeepSeek**：Base URL / 模型没填（或被清空）时回退官方模板，
+    /// 用户必须填的只有一把 API Key。
+    var llmConfiguration: LLMTranslationConfiguration {
+        LLMTranslationConfiguration(
+            baseURL: Self.setting(Self.llmBaseURLKey).flatMap(URL.init(string:))
+                ?? LLMTranslationConfiguration.deepSeekTemplate.baseURL,
+            apiKey: KeychainStore.mailingo.get(Self.llmAPIKeyAccount) ?? "",
+            model: Self.setting(Self.llmModelKey) ?? LLMTranslationConfiguration.deepSeekTemplate.model
+        )
+    }
+
+    static let llmBaseURLKey = "llm.baseURL"
+    static let llmModelKey = "llm.model"
+    static let llmAPIKeyAccount = "llm.apiKey"
+
+    /// 读设置里的字符串；空串 / 纯空白视为未填写（用户清空过的字段
+    /// 在 UserDefaults 里是 ""，不能让回退逻辑失效）。
+    private static func setting(_ key: String) -> String? {
+        let raw = UserDefaults.standard.string(forKey: key) ?? ""
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    // MARK: 图片翻译
+
+    /// 单张内联图的翻译状态。键是 Content-ID；**不在字典里 = 未翻译（idle）**。
+    enum ImageTranslationState: Sendable, Equatable {
+        case running
+        case translated
+        case failed(String)
+    }
+
+    /// 每张内联图的翻译状态 —— 驱动图右下角的角标文案。
+    /// 换邮件时整体清空（见 `analyze`）。
+    @Published private(set) var imageTranslations: [String: ImageTranslationState] = [:]
+    /// 已翻译的图源（渲染好的整图），scheme handler 用它替换原图字节。
+    @Published private(set) var translatedImageResults: [String: TranslatedImage] = [:]
+
+    static let imgtransSecretIDKey = "imgtrans.secretId"
+    static let imgtransSecretKeyAccount = "imgtrans.secretKey"
+    static let autoTranslateImagesKey = "imgtrans.autoTranslate"
+
+    /// 图片翻译服务。没配密钥时返回 nil（角标点击后给出配置指引）。
+    /// 密钥两侧裁剪空白 —— 粘贴时带进来的换行/空格会让签名必挂。
+    var imageTranslationService: ImageTranslationService? {
+        let secretID = (UserDefaults.standard.string(forKey: Self.imgtransSecretIDKey) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let secretKey = (KeychainStore.mailingo.get(Self.imgtransSecretKeyAccount) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !secretID.isEmpty, !secretKey.isEmpty else { return nil }
+        return TencentImageTranslationService(secretId: secretID, secretKey: secretKey)
+    }
+
+    /// 角标点击入口：没翻过的开始翻；已翻译的切回原图。
+    func imageAction(for cid: String) {
+        if imageTranslations[cid] == .translated {
+            // 切回原图：撤掉图源覆盖与状态即可（角标回到「译」，缓存还在，再点不花钱）
+            imageTranslations[cid] = nil
+            translatedImageResults[cid] = nil
+            return
+        }
+        Task { await translateImageTask(cid: cid) }
+    }
+
+    private func translateImageTask(cid: String) async {
+        guard let analysis, let resource = analysis.decoded.inlineResources[cid] else { return }
+        // running / translated 时不重复发起（failed 允许重试）
+        if imageTranslations[cid] == .running || imageTranslations[cid] == .translated { return }
+        guard let service = imageTranslationService else {
+            imageTranslations[cid] = .failed("未配置")
+            // 角标本身没有弹窗能力，失败原因必须浮到状态横幅上才看得见
+            translationStatus = .failed("图片翻译还没有配置腾讯云密钥 —— 到 设置 → 翻译（图片翻译）里填写后重试。")
+            return
+        }
+
+        imageTranslations[cid] = .running
+        let token = runToken
+        let started = Date()
+        trace.notice("图片翻译开始 cid=\(cid, privacy: .public) 原图 \(resource.data.count) 字节 → \(self.targetLanguage.minimalIdentifier, privacy: .public)")
+
+        do {
+            // 缓存键：图片内容的哈希 + 目标语言 + 厂商 —— 同一张图跨邮件不重复计费
+            let imageHash = TranslationCache.contentHash(of: resource.data)
+            let key = CacheKey(
+                messageKey: "imgtrans.\(imageHash)",
+                targetLanguage: targetLanguage.minimalIdentifier,
+                engineID: service.id,
+                pipelineVersion: CacheKey.currentPipelineVersion
+            )
+
+            if let cached = await TranslationCache.shared.lookup(key, sourceHash: imageHash),
+               let renderedBase64 = cached[0],
+               let rendered = Data(base64Encoded: renderedBase64) {
+                let result = TranslatedImage(
+                    imageData: rendered,
+                    mimeType: "image/jpeg",
+                    detectedText: cached[2],
+                    translatedText: cached[1]
+                )
+                guard runToken == token else { return }
+                translatedImageResults[cid] = result
+                imageTranslations[cid] = .translated
+                return
+            }
+
+            let result = try await service.translateImage(
+                data: resource.data,
+                mimeType: resource.mimeType,
+                target: targetLanguage
+            )
+            try Task.checkCancellation()
+            guard runToken == token else { return }
+            trace.notice("图片翻译完成 cid=\(cid, privacy: .public) 渲染图 \(result.imageData.count) 字节 耗时 \(String(format: "%.1f", Date().timeIntervalSince(started)), privacy: .public)s 识别:\(String((result.detectedText ?? "").prefix(40)), privacy: .public) 译文:\(String((result.translatedText ?? "").prefix(40)), privacy: .public)")
+
+            translatedImageResults[cid] = result
+            imageTranslations[cid] = .translated
+
+            // 写缓存：0=渲染图 base64，1=译文全文，2=识别的原文
+            await TranslationCache.shared.store(
+                key,
+                sourceHash: imageHash,
+                translations: [
+                    0: result.imageData.base64EncodedString(),
+                    1: result.translatedText ?? "",
+                    2: result.detectedText ?? ""
+                ]
+            )
+            await TranslationCache.shared.purge(policy: cachePolicy)
+        } catch is CancellationError {
+            if runToken == token { imageTranslations[cid] = nil }
+        } catch {
+            guard runToken == token else { return }
+            imageTranslations[cid] = .failed((error as? TranslationEngineError)?.description ?? error.localizedDescription)
+            // 失败原因浮到横幅上 —— 角标自己只会弹回「译」，光看图不知道发生了什么
+            translationStatus = .failed("图片翻译失败：\((error as? TranslationEngineError)?.description ?? error.localizedDescription)")
+        }
+    }
+
+    /// 「图片自动翻译」打开时：翻译落定后把当前邮件所有可翻的内联图排个队。
+    /// 腾讯接口限频 1 次/秒 —— 串行 + 间隔。没配服务就什么都不做（角标照常手动）。
+    private func maybeAutoTranslateImages() {
+        guard UserDefaults.standard.bool(forKey: Self.autoTranslateImagesKey) else { return }
+        guard imageTranslationService != nil, let analysis else { return }
+        let token = runToken
+        let pending = analysis.decoded.inlineResources
+            .filter { $0.value.mimeType.lowercased().hasPrefix("image/") && !$0.value.mimeType.lowercased().contains("gif") }
+            .map(\.key)
+            .filter { imageTranslations[$0] == nil }
+
+        Task { [weak self] in
+            for cid in pending {
+                guard let self, self.runToken == token else { return }
+                await self.translateImageTask(cid: cid)
+                // 限频 1 次/秒
+                try? await Task.sleep(for: .seconds(1.1))
+            }
+        }
+    }
+
     // MARK: 翻译语言对
 
     /// 源语言。`nil` = 自动检测（跟网页翻译一致）。
@@ -745,10 +939,15 @@ final class InspectorModel: ObservableObject {
 
     // MARK: - 翻译
 
-    /// 开发者模式关闭时强制用正式的 Apple 翻译 ——
+    /// 生效引擎：开发者模式优先用 dev 选择的三件套；否则用用户在设置里
+    /// 选的正式引擎（Apple 或大模型）。旧注释的语义不变——
     /// 「标记替换 / 原样返回」只是调试用的，不能让正常用户翻出一堆〖0〗。
     private var effectiveEngine: TranslationEngine {
-        DeveloperMode.isOn ? engineChoice.engine : AppleTranslationEngine()
+        if DeveloperMode.isOn { return engineChoice.engine }
+        switch translationEngineChoice {
+        case .apple: return AppleTranslationEngine()
+        case .llm: return LLMTranslationEngine(configuration: llmConfiguration)
+        }
     }
 
     /// 开发者模式开关变化时调用：引擎的选择范围变了，需要重翻一次。
@@ -835,6 +1034,7 @@ final class InspectorModel: ObservableObject {
             inspection = applied
             translationStatus = .idle
             cacheStatus = .hit
+            maybeAutoTranslateImages()
             return
         }
         cacheStatus = ignoringCache ? .bypassed : .missed
@@ -874,6 +1074,7 @@ final class InspectorModel: ObservableObject {
             guard runToken == token else { return }
             inspection = applied
             translationStatus = .idle
+            maybeAutoTranslateImages()
         } catch is CancellationError {
             // 用户切了引擎或换了邮件，静默丢弃。
             //
@@ -905,11 +1106,11 @@ final class InspectorModel: ObservableObject {
         let report = await TranslationDiagnostics.probe(
             segments: analysis.segments,
             target: targetLanguage,
-            engine: engineChoice.engine,
+            engine: effectiveEngine,
             allowDownloadTrigger: allowDownloadTrigger
         )
 
-        DiagnosticLog.append(report.text, label: "翻译链路自检（引擎：\(engineChoice.label)）")
+        DiagnosticLog.append(report.text, label: "翻译链路自检（引擎：\(effectiveEngine.displayName)）")
         return report
     }
 
@@ -942,6 +1143,9 @@ final class InspectorModel: ObservableObject {
         self.sourceBytes = data.count
         self.inspection = placeholder
         self.state = .loaded
+        // 图片翻译状态是**按邮件**的：换邮件整体清空，角标从「译」重新开始
+        imageTranslations = [:]
+        translatedImageResults = [:]
         trace.notice("load 落地 \(self.currentMessage?.id ?? "?", privacy: .public) → 界面切到这一封")
         restartTranslation(ignoringCache: ignoringCache)
     }
