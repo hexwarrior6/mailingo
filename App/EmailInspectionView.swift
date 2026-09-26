@@ -21,7 +21,7 @@ struct EmailInspectionView: View {
     @AppStorage(DeveloperMode.storageKey) private var isDeveloperMode = false
     /// 是否加载外部图片。默认**关闭** —— 远程图片是最常见的追踪手段，
     /// 发件人靠它知道你什么时候、看了几次。和 Mail 的行为一致。
-    @AppStorage("inspector.loadRemoteImages") private var allowsRemoteContent = false
+    @AppStorage(InspectorModel.allowsRemoteContentKey) private var allowsRemoteContent = false
 
     /// 看什么：只看原文 / 只看译文 / 双语并排。
     ///
@@ -505,9 +505,10 @@ struct EmailInspectionView: View {
         )
     }
 
-    /// 图片翻译的呈现层：**每张可翻的内联图都应有角标** ——
+    /// 图片翻译的呈现层：**每张可翻的图都应有角标** ——
     /// 未翻译 = 「译」（idle 的图不在状态字典里，必须先铺上默认角标），
     /// 翻译中 = 「…」，已翻译 = 「原」（点它切回原图），失败 = 「译」可重试。
+    /// 内联图始终参与；外部图只在远程内容被放行时参与（拦截中的图连显示都没有）。
     private func imageTranslationPresentation(for inspection: EmailInspection) -> EmailWebView.ImageTranslationPresentation {
         var badges: [String: ImageTranslationOverlay.Badge] = [:]
         for (cid, resource) in inspection.decoded.inlineResources {
@@ -515,17 +516,22 @@ struct EmailInspectionView: View {
             guard mime.hasPrefix("image/"), !mime.contains("gif") else { continue }
             badges[cid] = .translate
         }
-        for (cid, state) in model.imageTranslations {
+        if allowsRemoteContent {
+            for url in RemoteContentScanner.remoteImageURLs(in: inspection.splicedHTML) {
+                badges[url] = .translate
+            }
+        }
+        for (key, state) in model.imageTranslations {
             switch state {
-            case .running: badges[cid] = .busy
-            case .translated: badges[cid] = .restore
-            case .failed: badges[cid] = .translate
+            case .running: badges[key] = .busy
+            case .translated: badges[key] = .restore
+            case .failed: badges[key] = .translate
             }
         }
         return EmailWebView.ImageTranslationPresentation(
             badges: badges,
             results: model.translatedImageResults,
-            onAction: { cid in model.imageAction(for: cid) }
+            onAction: { key in model.imageAction(for: key) }
         )
     }
 

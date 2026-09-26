@@ -15,16 +15,29 @@ public enum RemoteContentScanner {
 
     /// 引用外部（http/https）图片的 `<img>` 数量。
     public static func remoteImageCount(in html: String) -> Int {
-        guard let tagRegex = try? NSRegularExpression(pattern: #"(?is)<img\b[^>]*>"#) else { return 0 }
-        guard let srcRegex = try? NSRegularExpression(pattern: #"(?is)\bsrc\s*=\s*["']?\s*https?://"#) else { return 0 }
+        remoteImageURLs(in: html).count
+    }
+
+    /// 邮件里全部外部图片的 src（文档顺序，去重）。
+    ///
+    /// 图片翻译的角标按这个清单铺：这些图要能被点「译」，就得先知道它们是谁。
+    /// 注意 src 里的 HTML 实体（`&amp;` 等）**不在这里解码** —— 调用方按需处理，
+    /// 因为改写回 HTML 时必须保持实体原样。
+    public static func remoteImageURLs(in html: String) -> [String] {
+        guard let tagRegex = try? NSRegularExpression(pattern: #"(?is)<img\b[^>]*>"#) else { return [] }
+        guard let srcRegex = try? NSRegularExpression(pattern: #"(?is)\bsrc\s*=\s*["']?\s*(https?://[^"'\s>]+)"#) else { return [] }
 
         let full = NSRange(html.startIndex..., in: html)
-        return tagRegex.matches(in: html, range: full).reduce(into: 0) { count, match in
-            guard let range = Range(match.range, in: html) else { return }
-            let tag = String(html[range])
-            if srcRegex.firstMatch(in: tag, range: NSRange(tag.startIndex..., in: tag)) != nil {
-                count += 1
-            }
+        var urls: [String] = []
+        var seen = Set<String>()
+        for match in tagRegex.matches(in: html, range: full) {
+            guard let tagRange = Range(match.range, in: html) else { continue }
+            let tag = String(html[tagRange])
+            guard let srcMatch = srcRegex.firstMatch(in: tag, range: NSRange(tag.startIndex..., in: tag)),
+                  let valueRange = Range(srcMatch.range(at: 1), in: tag) else { continue }
+            let url = String(tag[valueRange])
+            if seen.insert(url).inserted { urls.append(url) }
         }
+        return urls
     }
 }

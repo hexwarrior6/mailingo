@@ -195,6 +195,8 @@ final class InspectorModel: ObservableObject {
     static let imgtransSecretIDKey = "imgtrans.secretId"
     static let imgtransSecretKeyAccount = "imgtrans.secretKey"
     static let autoTranslateImagesKey = "imgtrans.autoTranslate"
+    /// 与 EmailInspectionView 的「载入远程图片」开关同一份存储。
+    static let allowsRemoteContentKey = "inspector.loadRemoteImages"
 
     /// 图片翻译服务。没配密钥时返回 nil（角标点击后给出配置指引）。
     /// 密钥两侧裁剪空白 —— 粘贴时带进来的换行/空格会让签名必挂。
@@ -208,43 +210,70 @@ final class InspectorModel: ObservableObject {
     }
 
     /// 角标点击入口：没翻过的开始翻；已翻译的切回原图。
-    func imageAction(for cid: String) {
-        if imageTranslations[cid] == .translated {
+    /// 键 = 图源键：内联图是 Content-ID，外部图是完整 URL。
+    func imageAction(for key: String) {
+        if imageTranslations[key] == .translated {
             // 切回原图：撤掉图源覆盖与状态即可（角标回到「译」，缓存还在，再点不花钱）
-            imageTranslations[cid] = nil
-            translatedImageResults[cid] = nil
+            imageTranslations[key] = nil
+            translatedImageResults[key] = nil
             return
         }
-        Task { await translateImageTask(cid: cid) }
+        Task { await translateImageTask(key: key) }
     }
 
-    private func translateImageTask(cid: String) async {
-        guard let analysis, let resource = analysis.decoded.inlineResources[cid] else { return }
+    private func translateImageTask(key: String) async {
+        guard let analysis else { return }
         // running / translated 时不重复发起（failed 允许重试）
-        if imageTranslations[cid] == .running || imageTranslations[cid] == .translated { return }
+        if imageTranslations[key] == .running || imageTranslations[key] == .translated { return }
         guard let service = imageTranslationService else {
-            imageTranslations[cid] = .failed("未配置")
+            imageTranslations[key] = .failed("未配置")
             // 角标本身没有弹窗能力，失败原因必须浮到状态横幅上才看得见
             translationStatus = .failed("图片翻译还没有配置腾讯云密钥 —— 到 设置 → 翻译（图片翻译）里填写后重试。")
             return
         }
 
-        imageTranslations[cid] = .running
+        imageTranslations[key] = .running
         let token = runToken
         let started = Date()
-        trace.notice("图片翻译开始 cid=\(cid, privacy: .public) 原图 \(resource.data.count) 字节 → \(self.targetLanguage.minimalIdentifier, privacy: .public)")
 
         do {
+            // 取图：内联图直接取 MIME 字节；外部图（http/https）现下载 ——
+            // 用户点「译」或开了自动翻译都是主动行为，不违背远程拦截的默认立场
+            let imageData: Data
+            let mimeType: String
+            let lowerKey = key.lowercased()
+            if lowerKey.hasPrefix("http://") || lowerKey.hasPrefix("https://") {
+                guard let url = URL(string: key) else {
+                    throw TranslationEngineError.engineFailed("图片链接无效：\(key)")
+                }
+                let (data, response) = try await URLSession.shared.data(from: url)
+                let mime = response.mimeType ?? "application/octet-stream"
+                guard mime.lowercased().hasPrefix("image/") else {
+                    throw TranslationEngineError.engineFailed("链接指向的不是图片（\(mime)）")
+                }
+                guard data.count <= 10 * 1024 * 1024 else {
+                    throw TranslationEngineError.engineFailed("图片超过 10MB，超出接口限制")
+                }
+                imageData = data
+                mimeType = mime
+            } else {
+                guard let resource = analysis.decoded.inlineResources[key] else { return }
+                imageData = resource.data
+                mimeType = resource.mimeType
+            }
+
+            trace.notice("图片翻译开始 key=\(key, privacy: .public) 原图 \(imageData.count) 字节 → \(self.targetLanguage.minimalIdentifier, privacy: .public)")
+
             // 缓存键：图片内容的哈希 + 目标语言 + 厂商 —— 同一张图跨邮件不重复计费
-            let imageHash = TranslationCache.contentHash(of: resource.data)
-            let key = CacheKey(
+            let imageHash = TranslationCache.contentHash(of: imageData)
+            let cacheKey = CacheKey(
                 messageKey: "imgtrans.\(imageHash)",
                 targetLanguage: targetLanguage.minimalIdentifier,
                 engineID: service.id,
                 pipelineVersion: CacheKey.currentPipelineVersion
             )
 
-            if let cached = await TranslationCache.shared.lookup(key, sourceHash: imageHash),
+            if let cached = await TranslationCache.shared.lookup(cacheKey, sourceHash: imageHash),
                let renderedBase64 = cached[0],
                let rendered = Data(base64Encoded: renderedBase64) {
                 let result = TranslatedImage(
@@ -254,26 +283,26 @@ final class InspectorModel: ObservableObject {
                     translatedText: cached[1]
                 )
                 guard runToken == token else { return }
-                translatedImageResults[cid] = result
-                imageTranslations[cid] = .translated
+                translatedImageResults[key] = result
+                imageTranslations[key] = .translated
                 return
             }
 
             let result = try await service.translateImage(
-                data: resource.data,
-                mimeType: resource.mimeType,
+                data: imageData,
+                mimeType: mimeType,
                 target: targetLanguage
             )
             try Task.checkCancellation()
             guard runToken == token else { return }
-            trace.notice("图片翻译完成 cid=\(cid, privacy: .public) 渲染图 \(result.imageData.count) 字节 耗时 \(String(format: "%.1f", Date().timeIntervalSince(started)), privacy: .public)s 识别:\(String((result.detectedText ?? "").prefix(40)), privacy: .public) 译文:\(String((result.translatedText ?? "").prefix(40)), privacy: .public)")
+            trace.notice("图片翻译完成 key=\(key, privacy: .public) 渲染图 \(result.imageData.count) 字节 耗时 \(String(format: "%.1f", Date().timeIntervalSince(started)), privacy: .public)s 识别:\(String((result.detectedText ?? "").prefix(40)), privacy: .public) 译文:\(String((result.translatedText ?? "").prefix(40)), privacy: .public)")
 
-            translatedImageResults[cid] = result
-            imageTranslations[cid] = .translated
+            translatedImageResults[key] = result
+            imageTranslations[key] = .translated
 
             // 写缓存：0=渲染图 base64，1=译文全文，2=识别的原文
             await TranslationCache.shared.store(
-                key,
+                cacheKey,
                 sourceHash: imageHash,
                 translations: [
                     0: result.imageData.base64EncodedString(),
@@ -283,30 +312,35 @@ final class InspectorModel: ObservableObject {
             )
             await TranslationCache.shared.purge(policy: cachePolicy)
         } catch is CancellationError {
-            if runToken == token { imageTranslations[cid] = nil }
+            if runToken == token { imageTranslations[key] = nil }
         } catch {
             guard runToken == token else { return }
-            imageTranslations[cid] = .failed((error as? TranslationEngineError)?.description ?? error.localizedDescription)
+            imageTranslations[key] = .failed((error as? TranslationEngineError)?.description ?? error.localizedDescription)
             // 失败原因浮到横幅上 —— 角标自己只会弹回「译」，光看图不知道发生了什么
             translationStatus = .failed("图片翻译失败：\((error as? TranslationEngineError)?.description ?? error.localizedDescription)")
         }
     }
 
-    /// 「图片自动翻译」打开时：翻译落定后把当前邮件所有可翻的内联图排个队。
-    /// 腾讯接口限频 1 次/秒 —— 串行 + 间隔。没配服务就什么都不做（角标照常手动）。
+    /// 「图片自动翻译」打开时：翻译落定后把当前邮件所有可翻的图排个队。
+    /// 内联图始终参与；**外部图只在远程内容被放行时参与**（拦截中的图
+    /// 连显示都没有，替用户去下载违背拦截的立场）。腾讯接口限频 1 次/秒。
     private func maybeAutoTranslateImages() {
         guard UserDefaults.standard.bool(forKey: Self.autoTranslateImagesKey) else { return }
         guard imageTranslationService != nil, let analysis else { return }
         let token = runToken
-        let pending = analysis.decoded.inlineResources
+        var pending = analysis.decoded.inlineResources
             .filter { $0.value.mimeType.lowercased().hasPrefix("image/") && !$0.value.mimeType.lowercased().contains("gif") }
             .map(\.key)
-            .filter { imageTranslations[$0] == nil }
+        if UserDefaults.standard.bool(forKey: Self.allowsRemoteContentKey) {
+            let remote = (inspection?.splicedHTML).map { RemoteContentScanner.remoteImageURLs(in: $0) } ?? []
+            pending.append(contentsOf: remote)
+        }
+        pending = pending.filter { imageTranslations[$0] == nil }
 
         Task { [weak self] in
-            for cid in pending {
+            for key in pending {
                 guard let self, self.runToken == token else { return }
-                await self.translateImageTask(cid: cid)
+                await self.translateImageTask(key: key)
                 // 限频 1 次/秒
                 try? await Task.sleep(for: .seconds(1.1))
             }
