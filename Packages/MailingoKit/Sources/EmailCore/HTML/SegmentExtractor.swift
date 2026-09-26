@@ -132,6 +132,14 @@ enum SegmentExtractor {
             && !text.contains(where: { $0.isWhitespace })
         if looksLikeURL { return false }
 
+        // 裸域名（可带路径）不翻：`github.com`、`github.com/ntngale/messenger`。
+        // Apple Mail 会把正文里的链接转成"富链接卡片"，卡片的标题文字正是这种裸域名。
+        // 它们进翻译引擎没有意义，更要命的是会进入语言检测的样本 —— 实测一行
+        // `github.com` 就能把 `NLLanguageRecognizer` 对整封英文邮件的判定从
+        // en(0.997) 带偏成 nb(0.362)，刚好越过置信度门槛，最终报出
+        // "不支持的语言对：nb → zh"（nb→zh 系统翻译本来就不支持）。
+        if looksLikeBareDomain(text) { return false }
+
         // 裸邮箱地址不翻（不含空白的单独一个 a@b.c）
         if !text.contains(where: { $0.isWhitespace }),
            text.filter({ $0 == "@" }).count == 1,
@@ -140,5 +148,29 @@ enum SegmentExtractor {
         }
 
         return true
+    }
+
+    /// 是不是"没有协议前缀的域名（可带路径）"：`github.com`、`arxiv.org`、
+    /// `mail.ntu.edu.sg`、`github.com/ntngale/messenger`。
+    ///
+    /// 判据刻意保守：不含空白、域名本体全部由 ASCII 字母 / 数字 / 连字符 / 点
+    /// 组成、至少两段、末段（近似 TLD）至少两个纯字母。这样 `e.g.`（末段只有
+    /// 1 个字母）、版本号 `1.2.3`（末段非纯字母）、带空格的普通文本都不会被误伤。
+    private static func looksLikeBareDomain(_ text: String) -> Bool {
+        guard !text.contains(where: { $0.isWhitespace }) else { return false }
+
+        // 去掉路径部分（第一个 `/` 及其后），只看域名本体
+        let host = text.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)[0]
+
+        let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2, let tld = labels.last,
+              tld.count >= 2,
+              tld.allSatisfy({ $0.isASCII && $0.isLetter }) else {
+            return false
+        }
+        return labels.allSatisfy { label in
+            !label.isEmpty
+                && label.allSatisfy { ($0.isASCII && ($0.isLetter || $0.isNumber)) || $0 == "-" }
+        }
     }
 }

@@ -28,7 +28,8 @@ public struct CacheKey: Hashable, Sendable {
     }
 
     /// 当前切片管线的版本。改了 SegmentExtractor / HTMLSplicer 就要 +1。
-    public static let currentPipelineVersion = 1
+    /// v2：裸域名不再作为片段（此前一行 `github.com` 会污染语言检测，见 SegmentExtractor）。
+    public static let currentPipelineVersion = 2
 }
 
 /// 缓存的清理策略（用户可在设置里改）。

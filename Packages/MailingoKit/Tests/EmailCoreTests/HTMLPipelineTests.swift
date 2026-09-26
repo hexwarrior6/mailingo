@@ -109,6 +109,27 @@ final class HTMLPipelineTests: XCTestCase {
         XCTAssertEqual(try SegmentExtractor.extract(from: html).map(\.sourceText), ["Real text"])
     }
 
+    /// 裸域名（富链接卡片的标题、手打的域名）不进翻译管线 ——
+    /// 它们没有翻译价值，更会污染语言检测的样本（一行 `github.com` 曾把
+    /// 整封英文邮件识别成挪威语，报"不支持的语言对：nb → zh"）。
+    func testBareDomainsAreNotTranslated() throws {
+        let html = """
+        <p>github.com</p><p>GitHub.com/Ntngale/messenger</p><p>mail.ntu.edu.sg</p><p>arxiv.org</p><p>Real text</p>
+        """
+        XCTAssertEqual(try SegmentExtractor.extract(from: html).map(\.sourceText), ["Real text"])
+    }
+
+    /// 裸域名的判据必须保守：缩写、版本号、普通短句不能被误伤。
+    func testBareDomainFilterDoesNotEatOrdinaryText() throws {
+        let html = """
+        <p>e.g.</p><p>v1.2.3</p><p>U.S.A</p><p>version 2.0</p><p>Read the docs on GitHub</p>
+        """
+        XCTAssertEqual(
+            try SegmentExtractor.extract(from: html).map(\.sourceText),
+            ["e.g.", "v1.2.3", "U.S.A", "version 2.0", "Read the docs on GitHub"]
+        )
+    }
+
     // MARK: - 空白与实体
 
     func testWhitespaceBetweenInlineTagsIsPreserved() throws {

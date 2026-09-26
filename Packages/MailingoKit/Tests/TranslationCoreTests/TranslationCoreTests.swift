@@ -87,6 +87,33 @@ final class TranslationCoreTests: XCTestCase {
         XCTAssertEqual(LanguageDetector.detect(in: segments)?.languageCode?.identifier, "en")
     }
 
+    /// 回归：真实邮件里富链接卡片的标题 `github.com` 混进检测样本后，
+    /// 整封英文邮件曾被识别成挪威语（nb，0.362 刚好越过 0.35 门槛），
+    /// 而系统翻译不支持 nb → zh，直接报"不支持的语言对"。
+    /// 修法在 SegmentExtractor（裸域名不成为片段）；这里从原始 MIME 一路
+    /// 走到检测，钉住端到端的结果 —— 样本里没有裸域名，判定必须还是英文。
+    func testDetectionSurvivesRichLinkDomainCaptions() throws {
+        let eml = """
+        From: Ira Kumar <ira@example.com>
+        To: Yuhao <yuhao@example.com>
+        Subject: Re: Nightingale Messenger
+        Content-Type: text/html; charset=utf-8
+
+        <html><body>
+        <p>[Alert: Non-NTU Email] Be cautious before clicking any link or attachment.</p>
+        <div><a href="https://github.com/Ntngale/messenger/invitations">github.com</a></div>
+        <p>Try again.</p>
+        <p>Determine if this is helpful for build evaluation:</p>
+        <p>Introducing Synthetic Hospital: an open, fully synthetic longitudinal EHR benchmark with verifiable ground truth!</p>
+        <p>1,268 patients, 5,602 encounters, zero PHI. Physicians could not reliably distinguish its charts from real ones.</p>
+        </body></html>
+        """
+        let analysis = try EmailInspector.analyze(rawMessage: Data(eml.utf8))
+        XCTAssertFalse(analysis.segments.contains { $0.sourceText == "github.com" },
+                       "裸域名被当成片段送进了管线")
+        XCTAssertEqual(LanguageDetector.detect(in: analysis.segments)?.languageCode?.identifier, "en")
+    }
+
     // MARK: - 引擎契约（用假引擎验证协议本身）
 
     func testFakeEnginesHonourTheProtocolContract() async throws {
