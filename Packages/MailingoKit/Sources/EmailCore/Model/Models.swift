@@ -181,6 +181,17 @@ public enum TranslationEngineError: Error, CustomStringConvertible {
             "翻译失败：\(detail)"
         }
     }
+
+    /// 是不是「语言包下载确认框被取消」（`NSCocoaErrorDomain` 3072，
+    /// 即 `NSUserCancelledError`）。
+    ///
+    /// 语言包没装时选翻译，系统会弹下载确认框；一取消，翻译就以这个
+    /// 原始错误串收场（`Error Domain=NSCocoaErrorDomain Code=3072 …`）——
+    /// 对用户没有意义，界面上要把它翻译成人话。
+    public static func isCancelledLanguagePackDownload(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == NSCocoaErrorDomain && nsError.code == NSUserCancelledError
+    }
 }
 
 /// 翻译层抽象（方案 §7）。UI 不直接依赖具体引擎。

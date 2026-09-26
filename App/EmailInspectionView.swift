@@ -11,6 +11,9 @@ struct EmailInspectionView: View {
 
     @ObservedObject var model: InspectorModel
 
+    /// 语言对菜单里「管理语言包…」要打开设置窗口。
+    @Environment(\.openSettings) private var openSettings
+
     @State private var isImporting = false
     @AppStorage("inspector.showSegments") private var isSegmentsVisible = true
     @AppStorage("inspector.displayMode") private var displayMode: DisplayMode = .bilingual
@@ -84,6 +87,8 @@ struct EmailInspectionView: View {
 
     private var toolbar: some View {
         // 并排使用时窗口会很窄，固定一行放不下 —— ViewThatFits 会自动折成两行。
+        // 语言对菜单固定**右对齐**：它是"现在翻成什么"的状态，放右边
+        // 与网页翻译的习惯一致，也不跟左侧的邮件选择挤在一起。
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 10) {
                 toolbarLeading
@@ -92,11 +97,12 @@ struct EmailInspectionView: View {
                     toolbarTrailing
                 }
                 Spacer(minLength: 0)
+                languagePairMenu
             }
             .padding(12)
 
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) { toolbarLeading; Spacer(minLength: 0) }
+                HStack(spacing: 10) { toolbarLeading; Spacer(minLength: 0); languagePairMenu }
                 if isDeveloperMode {
                     HStack(spacing: 10) { toolbarTrailing; Spacer(minLength: 0) }
                 }
@@ -122,6 +128,61 @@ struct EmailInspectionView: View {
         if isDeveloperMode {
             Button("打开 .eml…") { isImporting = true }
         }
+    }
+
+    /// 翻译语言对：源语言可自动检测，也可手动指定 —— 跟网页翻译一致。
+    ///
+    /// 手动钉住源语言同时是绕过自动检测误判的手段：检测器认错时
+    /// （英文邮件被认成挪威语之类），钉一下就绕过去了。
+    private var languagePairMenu: some View {
+        Menu {
+            Picker("源语言", selection: $model.sourceLanguage) {
+                Text("自动检测").tag(Locale.Language?.none)
+                ForEach(model.supportedLanguages, id: \.self) { language in
+                    Text(TranslationLanguages.displayName(for: language))
+                        .tag(Optional(language))
+                }
+            }
+            Picker("目标语言", selection: $model.targetLanguage) {
+                ForEach(model.supportedLanguages, id: \.self) { language in
+                    Text(TranslationLanguages.displayName(for: language))
+                        .tag(language)
+                }
+            }
+            Divider()
+            Button("管理语言包…") { openSettings() }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "globe")
+                Text(languagePairLabel)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            // 超长（钉住的语言名很长）才截断；平时按内容收缩，文字紧贴右侧
+            .frame(maxWidth: 150, alignment: .trailing)
+        }
+        .menuStyle(.borderlessButton)
+        // 必须水平 fixedSize：HStack 里有个 Spacer，水平可伸缩的控件会被
+        // 撑到几百 pt —— 文字（左）和下拉箭头（右）中间空出一大圈。
+        // 收缩到内容大小后，文字才真正贴着右边缘。
+        .fixedSize(horizontal: true, vertical: true)
+        .help("翻译语言对：\(languagePairDescription)。目标语言包没装时，首次翻译会弹出系统下载确认。")
+    }
+
+    /// 菜单标签上的**紧凑**写法：默认（自动检测）只显示目标语言 ——
+    /// 源语言是自动检测这件事不用占着工具栏；钉住了源语言才亮出来，
+    /// 因为那是个少见的纠偏动作，藏起来反而让人忘了它是钉着的。
+    private var languagePairLabel: String {
+        guard let source = model.sourceLanguage else {
+            return TranslationLanguages.displayName(for: model.targetLanguage)
+        }
+        return "\(TranslationLanguages.displayName(for: source)) → \(TranslationLanguages.displayName(for: model.targetLanguage))"
+    }
+
+    /// 完整写法（给 tooltip）：源为自动检测时明确说"自动检测"。
+    private var languagePairDescription: String {
+        let source = model.sourceLanguage.map { TranslationLanguages.displayName(for: $0) } ?? "自动检测"
+        return "\(source) → \(TranslationLanguages.displayName(for: model.targetLanguage))"
     }
 
     /// 只有开发者模式才有的控件：切引擎、跑自检。
@@ -205,6 +266,13 @@ struct EmailInspectionView: View {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 Text(message).font(.caption).textSelection(.enabled)
                 Spacer()
+                // 失败横幅以前没有任何动作入口 —— 比如语言对不支持时，
+                // 用户得自己反应过来去工具栏换语言。给个直达的重试。
+                Button("重试") {
+                    Task { await model.retranslate() }
+                }
+                .font(.caption)
+                .controlSize(.small)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
@@ -425,7 +493,9 @@ struct EmailInspectionView: View {
 
     private func translatedPane(_ inspection: EmailInspection) -> some View {
         PreviewPane(
-            title: model.isShowingRealTranslation ? "中文译文" : "切片后",
+            title: model.isShowingRealTranslation
+                ? "译文 · \(TranslationLanguages.displayName(for: model.targetLanguage))"
+                : "切片后",
             subtitle: "\(inspection.segments.count) 段",
             html: inspection.splicedHTML,
             inlineResources: inspection.decoded.inlineResources,

@@ -1,6 +1,7 @@
 import EmailCore
 import Foundation
 import NaturalLanguage
+import Translation
 
 /// 源语言检测。
 ///
@@ -54,8 +55,19 @@ public enum LanguageDetector {
 
 /// 语言相关的常量与便利。
 public enum TranslationLanguages {
-    /// V1 的默认目标语言（PRODUCT.md §7）。
+    /// 默认目标语言（PRODUCT.md §7）。用户可以在翻译菜单里换成别的。
     public static let simplifiedChinese = Locale.Language(identifier: "zh-Hans")
+
+    /// 系统翻译支持的全部语言，按显示名（中文 locale）排序。
+    ///
+    /// 翻译菜单和设置面板的语言清单都从这来。注意"支持"≠"已安装"：
+    /// 装没装要看 `LanguageAvailability.status(from:to:)`（设置面板逐行显示）。
+    /// 标识符是系统自己的写法（比如 `zh`、`zh-TW`、`en-GB`），调用方要拿
+    /// 存储的选中值与这份清单对齐，不能假设清单里一定有 `zh-Hans`。
+    public static func supported() async -> [Locale.Language] {
+        let languages = await LanguageAvailability().supportedLanguages
+        return languages.sorted { displayName(for: $0) < displayName(for: $1) }
+    }
 
     /// 把语言显示成人类可读的名字，用于 UI。
     public static func displayName(for language: Locale.Language, locale: Locale = Locale(identifier: "zh-Hans")) -> String {

@@ -41,7 +41,7 @@ final class InspectorModel: ObservableObject {
     /// 当前显示的到底是不是真译文。
     ///
     /// 开发者模式关闭时引擎被强制成 Apple 翻译，所以恒为 true；
-    /// 界面上用它决定右侧标题写「中文译文」还是「切片后」。
+    /// 界面上用它决定右侧标题写「译文 · 目标语言」还是「切片后」。
     var isShowingRealTranslation: Bool {
         !DeveloperMode.isOn || engineChoice == .apple
     }
@@ -117,6 +117,76 @@ final class InspectorModel: ObservableObject {
             guard oldValue != engineChoice else { return }
             restartTranslation()
         }
+    }
+
+    // MARK: 翻译语言对
+
+    /// 源语言。`nil` = 自动检测（跟网页翻译一致）。
+    ///
+    /// 持久化 —— 长期偏好。钉住源语言也是**绕过自动检测误判的用户手段**：
+    /// 检测器可能把英文邮件认成挪威语（nb），钉住"英语"后检测直接被跳过。
+    @Published var sourceLanguage: Locale.Language? =
+        InspectorModel.storedLanguage(forKey: InspectorModel.translationSourceLanguageKey) {
+        didSet {
+            guard oldValue != sourceLanguage else { return }
+            UserDefaults.standard.set(
+                sourceLanguage.map(\.minimalIdentifier) ?? "",
+                forKey: Self.translationSourceLanguageKey
+            )
+            restartTranslation()
+        }
+    }
+
+    /// 目标语言。默认简体中文（PRODUCT.md §7），可在翻译菜单里换。
+    @Published var targetLanguage: Locale.Language =
+        InspectorModel.storedLanguage(forKey: InspectorModel.translationTargetLanguageKey)
+            ?? TranslationLanguages.simplifiedChinese {
+        didSet {
+            guard oldValue != targetLanguage else { return }
+            UserDefaults.standard.set(
+                targetLanguage.minimalIdentifier,
+                forKey: Self.translationTargetLanguageKey
+            )
+            restartTranslation()
+        }
+    }
+
+    static let translationSourceLanguageKey = "translation.sourceLanguage"
+    static let translationTargetLanguageKey = "translation.targetLanguage"
+
+    /// 从 UserDefaults 读语言标识符；空串 / 缺失返回 nil。
+    private static func storedLanguage(forKey key: String) -> Locale.Language? {
+        let raw = UserDefaults.standard.string(forKey: key) ?? ""
+        return raw.isEmpty ? nil : Locale.Language(identifier: raw)
+    }
+
+    /// 系统翻译支持的语言（翻译菜单与设置面板共用的清单）。
+    /// bootstrap 时加载一次；设置面板里有手动刷新入口。
+    @Published private(set) var supportedLanguages: [Locale.Language] = []
+
+    /// 加载系统支持的语言清单，并把存储的选中值对齐到系统的标识符。
+    ///
+    /// 系统清单用的是它自己的标识符（`zh`、`zh-TW`…），而我们存储的默认值
+    /// 是 `zh-Hans` —— 不对齐的话，菜单里两个语言子菜单都显示不出当前选中项。
+    /// 对齐规则：同语言代码下挑标识符最短的那个（`zh` 优先于 `zh-TW`）。
+    func refreshSupportedLanguages() async {
+        let languages = await TranslationLanguages.supported()
+        if let reconciled = reconciled(targetLanguage, in: languages) {
+            targetLanguage = reconciled
+        }
+        if let reconciled = reconciled(sourceLanguage, in: languages) {
+            sourceLanguage = reconciled
+        }
+        supportedLanguages = languages
+    }
+
+    /// 把语言对齐到系统支持清单；找不到同语言的项就原样返回。
+    private func reconciled(_ language: Locale.Language?, in supported: [Locale.Language]) -> Locale.Language? {
+        guard let language, !supported.contains(language) else { return language }
+        let code = language.languageCode?.identifier
+        return supported
+            .filter { $0.languageCode?.identifier == code }
+            .min { $0.minimalIdentifier.count < $1.minimalIdentifier.count } ?? language
     }
 
     private(set) var sourceBytes: Int = 0
@@ -248,6 +318,8 @@ final class InspectorModel: ObservableObject {
         _ = await TranslationCache.shared.purge(policy: cachePolicy)
         startWatchingMessagesDirectory()
         refreshCapturedMessages(force: true)
+        // 语言清单是翻译菜单和设置面板共用的，启动时加载一次
+        await refreshSupportedLanguages()
 
         // ★ 被 Mail 横幅拉起来时，要显示的是**用户点的那一封**，不是"最近捕获的
         //   一封"。两个载入同时跑会互相顶掉：被顶掉的那次不会走到
@@ -746,7 +818,8 @@ final class InspectorModel: ObservableObject {
         let messageKey = currentInternetMessageID.map(MIMEHeaders.normalizeMessageID) ?? sourceHash
         let cacheKey = CacheKey(
             messageKey: messageKey,
-            targetLanguage: TranslationLanguages.simplifiedChinese.minimalIdentifier,
+            sourceLanguage: sourceLanguage?.minimalIdentifier,
+            targetLanguage: targetLanguage.minimalIdentifier,
             engineID: engine.id,
             pipelineVersion: CacheKey.currentPipelineVersion
         )
@@ -771,8 +844,8 @@ final class InspectorModel: ObservableObject {
         do {
             let translated = try await engine.translate(
                 segments: engineSegments,
-                sourceLanguage: nil,
-                targetLanguage: TranslationLanguages.simplifiedChinese,
+                sourceLanguage: sourceLanguage,
+                targetLanguage: targetLanguage,
                 progress: { [weak self] done, total in
                     Task { @MainActor in
                         // 同样要按代次过滤：被取代的那次翻译还在跑时，
@@ -831,6 +904,7 @@ final class InspectorModel: ObservableObject {
 
         let report = await TranslationDiagnostics.probe(
             segments: analysis.segments,
+            target: targetLanguage,
             engine: engineChoice.engine,
             allowDownloadTrigger: allowDownloadTrigger
         )
@@ -920,6 +994,12 @@ final class InspectorModel: ObservableObject {
     }
 
     private static func describe(_ error: Error) -> String {
+        // 语言包下载确认框被取消 —— 系统抛的是原始错误串
+        // 「Error Domain=NSCocoaErrorDomain Code=3072 …」，得翻成人话
+        // 并指路：横幅右边就是「重试」按钮。
+        if TranslationEngineError.isCancelledLanguagePackDownload(error) {
+            return "语言包尚未安装，下载确认框被取消 —— 点「重试」，在系统弹窗里确认下载即可（只需一次）；也可以在 设置 → 翻译语言包 里提前安装。"
+        }
         if let engineError = error as? TranslationEngineError {
             return engineError.description
         }

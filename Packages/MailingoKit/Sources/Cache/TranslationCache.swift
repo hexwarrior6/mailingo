@@ -15,13 +15,25 @@ import Foundation
 /// 不会白翻一遍。
 public struct CacheKey: Hashable, Sendable {
     public let messageKey: String
+    /// 源语言。`nil` = 自动检测。
+    ///
+    /// 单独成键：同一封邮件，"自动检测出的源"和"用户钉住的源"可能不同
+    /// （自动检测会出错，钉住本身就是纠正手段），两种结果不能互相覆盖。
+    public let sourceLanguage: String?
     public let targetLanguage: String
     public let engineID: String
     /// 分段/切片逻辑的版本。算法一变，旧缓存必须失效。
     public let pipelineVersion: Int
 
-    public init(messageKey: String, targetLanguage: String, engineID: String, pipelineVersion: Int) {
+    public init(
+        messageKey: String,
+        sourceLanguage: String? = nil,
+        targetLanguage: String,
+        engineID: String,
+        pipelineVersion: Int
+    ) {
         self.messageKey = messageKey
+        self.sourceLanguage = sourceLanguage
         self.targetLanguage = targetLanguage
         self.engineID = engineID
         self.pipelineVersion = pipelineVersion
@@ -256,7 +268,7 @@ public actor TranslationCache {
     // MARK: - 私有
 
     private func fileURL(for key: CacheKey) -> URL {
-        let raw = "\(key.messageKey)\u{1F}\(key.targetLanguage)\u{1F}\(key.engineID)\u{1F}\(key.pipelineVersion)"
+        let raw = "\(key.messageKey)\u{1F}\(key.sourceLanguage ?? "auto")\u{1F}\(key.targetLanguage)\u{1F}\(key.engineID)\u{1F}\(key.pipelineVersion)"
         let digest = SHA256.hash(data: Data(raw.utf8))
         let name = digest.prefix(16).map { String(format: "%02x", $0) }.joined()
         return directory.appendingPathComponent("\(name).json")

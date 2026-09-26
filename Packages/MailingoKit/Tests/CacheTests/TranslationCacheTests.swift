@@ -27,11 +27,12 @@ final class TranslationCacheTests: XCTestCase {
 
     private func key(
         message: String = "<a@b>",
+        source: String? = nil,
         language: String = "zh-Hans",
         engine: String = "apple.translation.v1",
         pipeline: Int = CacheKey.currentPipelineVersion
     ) -> CacheKey {
-        CacheKey(messageKey: message, targetLanguage: language, engineID: engine, pipelineVersion: pipeline)
+        CacheKey(messageKey: message, sourceLanguage: source, targetLanguage: language, engineID: engine, pipelineVersion: pipeline)
     }
 
     private func entryCount() async -> Int {
@@ -95,6 +96,20 @@ final class TranslationCacheTests: XCTestCase {
 
         let hit = await cache.lookup(key(language: "ja"), sourceHash: "h")
         XCTAssertNil(hit)
+    }
+
+    /// 钉住的源语言要参与缓存键：同一封邮件，"自动检测"和"钉住英语"是两条缓存 ——
+    /// 自动检测会出错，钉住本身就是纠正手段，两种结果不能互相覆盖。
+    func testPinnedSourceLanguageIsADifferentEntry() async {
+        await cache.store(key(source: "en"), sourceHash: "h", translations: [0: "钉住英语的结果"])
+
+        let pinned = await cache.lookup(key(source: "en"), sourceHash: "h")
+        let auto = await cache.lookup(key(source: nil), sourceHash: "h")
+        let other = await cache.lookup(key(source: "fr"), sourceHash: "h")
+
+        XCTAssertEqual(pinned, [0: "钉住英语的结果"])
+        XCTAssertNil(auto, "自动检测的缓存不该命中钉住英语的条目")
+        XCTAssertNil(other, "钉别的语言也不该命中")
     }
 
     func testStoreOverwritesExistingEntry() async {

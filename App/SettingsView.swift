@@ -1,10 +1,14 @@
+import AppKit
 import Cache
+import EmailCore
 import SwiftUI
+import Translation
+import TranslationCore
 
 /// 设置窗口（菜单栏「Mailingo → 设置…」，⌘,）。
 ///
-/// 目前只有缓存这一组 —— 也正是需要给用户可调的地方：
-/// 翻译缓存会一直变大，什么时候清、清到什么程度，应该由用户定。
+/// 分组：跟 Mail 联动、翻译语言包、翻译缓存 ——
+/// 都是"需要给用户可调"的地方。
 struct SettingsView: View {
 
     /// 跟 Mail 联动的那几项要和主窗口共用状态，所以拿的是同一个模型。
@@ -22,6 +26,7 @@ struct SettingsView: View {
     var body: some View {
         Form {
             mailLinkageSection
+            languagePacksSection
 
             Section {
                 ageRow
@@ -62,6 +67,15 @@ struct SettingsView: View {
         .frame(width: 480)
         .fixedSize(horizontal: false, vertical: true)
         .task { await refresh() }
+        .task { await refreshPacks() }
+        .onChange(of: model.translationStatus) { oldValue, newValue in
+            // 行数据是快照，而语言包还有一条**不经过本面板**的安装途径：
+            // 主窗口里翻译时弹的系统下载框。所以每次翻译从「进行中」落回
+            // 「空闲」（那可能刚装好一个包），就把整张表重新对一遍。
+            if case .running = oldValue, case .idle = newValue {
+                Task { await refreshPacks() }
+            }
+        }
         .onChange(of: maxAgeDays) { _, newValue in
             if newValue < 0 { maxAgeDays = 0 }
         }
@@ -114,6 +128,142 @@ struct SettingsView: View {
         } header: {
             Text("跟 Mail 联动")
         }
+    }
+
+    // MARK: - 翻译语言包
+
+    /// 一行 = 一个系统支持的语言 + 它的安装状态。
+    private struct LanguageRow: Identifiable {
+        let language: Locale.Language
+        let status: LanguageAvailability.Status
+
+        var id: String { language.minimalIdentifier }
+    }
+
+    @State private var languageRows: [LanguageRow] = []
+    @State private var downloadingID: String?
+    @State private var packsMessage: String?
+
+    private var languagePacksSection: some View {
+        Section {
+            if languageRows.isEmpty {
+                HStack {
+                    Spacer()
+                    ProgressView().controlSize(.small)
+                    Spacer()
+                }
+            } else {
+                ForEach(languageRows) { packRow($0) }
+            }
+
+            HStack(spacing: 10) {
+                Button("刷新") {
+                    Task { await refreshPacks() }
+                }
+                .disabled(downloadingID != nil)
+
+                Button("在系统设置中打开…") { openSystemLanguageSettings() }
+
+                Spacer()
+            }
+
+            if let packsMessage {
+                Text(packsMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("翻译语言包")
+        } footer: {
+            Text("语言包由 macOS 统一管理：下载会弹出系统确认框（需要主窗口开着）；翻译时选了没装的语言也会触发下载。删除没有系统接口，只能在系统设置的「语言与地区」里进行。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func packRow(_ row: LanguageRow) -> some View {
+        LabeledContent {
+            switch row.status {
+            case .installed:
+                // 装好的就是一个「勾」—— 不是下载按钮，也不该再触发下载
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .help("已安装")
+            case .supported:
+                if downloadingID == row.id {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button("下载") {
+                        Task { await download(row) }
+                    }
+                }
+            case .unsupported:
+                EmptyView()
+            }
+        } label: {
+            Text(TranslationLanguages.displayName(for: row.language))
+        }
+    }
+
+    private func refreshPacks() async {
+        await model.refreshSupportedLanguages()
+        let availability = LanguageAvailability()
+        // status 逐语言异步查 —— 21 个语言的查询在可感知时间内能跑完
+        var rows: [LanguageRow] = []
+        for language in model.supportedLanguages {
+            let status = await availability.status(from: language, to: nil)
+            rows.append(LanguageRow(language: language, status: status))
+        }
+        languageRows = rows
+    }
+
+    /// 触发一个语言的下载：借 `prepareTranslation()` 弹系统的确认框。
+    private func download(_ row: LanguageRow) async {
+        downloadingID = row.id
+        defer { downloadingID = nil }
+
+        // 点「下载」时**先重新查一遍本地状态**：行数据是面板打开那一刻的
+        // 快照，期间完全可能已经通过别的途径装好了（比如在主窗口切换语言对
+        // 时弹的系统下载框里点过确认）。已装的语言再 prepare 一遍，
+        // 会白白弹一次系统确认框 —— 那正是"明明装过了还让我下载"。
+        let availability = LanguageAvailability()
+        let current = await availability.status(from: row.language, to: nil)
+        if current == .installed {
+            packsMessage = "「\(TranslationLanguages.displayName(for: row.language))」已经安装过，无需重复下载。"
+            await refreshPacks()
+            return
+        }
+        guard current == .supported else {
+            packsMessage = "系统不支持下载「\(TranslationLanguages.displayName(for: row.language))」的语言包。"
+            await refreshPacks()
+            return
+        }
+
+        // 伙伴语言：挑一个**已安装**的语言组对，系统就只会下载缺的那边；
+        // 一个已安装的都没有时退回当前目标语言（缺什么系统会一起列出来）。
+        let partner = languageRows
+            .first { $0.status == .installed && $0.language != row.language }?
+            .language ?? model.targetLanguage
+
+        do {
+            try await AppleTranslationEngine().prepare(source: row.language, target: partner)
+            packsMessage = "已安装「\(TranslationLanguages.displayName(for: row.language))」。"
+        } catch {
+            if TranslationEngineError.isCancelledLanguagePackDownload(error) {
+                packsMessage = "已取消 —— 「\(TranslationLanguages.displayName(for: row.language))」语言包尚未安装，翻译时选到它会再次弹出下载确认框。"
+            } else {
+                packsMessage = "下载未完成：\((error as? TranslationEngineError)?.description ?? error.localizedDescription)"
+            }
+        }
+        await refreshPacks()
+    }
+
+    /// 删除语言包没有公开 API（macOS 15/26 都没有），只能把用户带到系统设置。
+    /// 深链标识符随系统版本可能变化，失败就退回打开系统设置主面板。
+    private func openSystemLanguageSettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.Language-Region.settings")
+        if let url, NSWorkspace.shared.open(url) { return }
+        _ = NSWorkspace.shared.open(URL(string: "x-apple.systempreferences://")!)
     }
 
     // MARK: - 清理规则
