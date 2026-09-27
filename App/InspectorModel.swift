@@ -195,18 +195,32 @@ final class InspectorModel: ObservableObject {
     static let imgtransSecretIDKey = "imgtrans.secretId"
     static let imgtransSecretKeyAccount = "imgtrans.secretKey"
     static let autoTranslateImagesKey = "imgtrans.autoTranslate"
+    static let imgtransVendorKey = "imgtrans.vendor"
+    static let baiduAppIDKey = "imgtrans.baidu.appId"
+    static let baiduSecretKeyAccount = "imgtrans.baidu.secretKey"
     /// 与 EmailInspectionView 的「载入远程图片」开关同一份存储。
     static let allowsRemoteContentKey = "inspector.loadRemoteImages"
 
     /// 图片翻译服务。没配密钥时返回 nil（角标点击后给出配置指引）。
-    /// 密钥两侧裁剪空白 —— 粘贴时带进来的换行/空格会让签名必挂。
+    /// 厂商二选一（腾讯云 / 百度翻译），密钥两侧裁剪空白 —— 粘贴时带进来的
+    /// 换行/空格会让签名/令牌必挂。
     var imageTranslationService: ImageTranslationService? {
-        let secretID = (UserDefaults.standard.string(forKey: Self.imgtransSecretIDKey) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let secretKey = (KeychainStore.mailingo.get(Self.imgtransSecretKeyAccount) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !secretID.isEmpty, !secretKey.isEmpty else { return nil }
-        return TencentImageTranslationService(secretId: secretID, secretKey: secretKey)
+        let vendor = UserDefaults.standard.string(forKey: Self.imgtransVendorKey) ?? "tencent"
+        switch vendor {
+        case "baidu":
+            // 百度 ait/api 需要两个**配对**凭证：请求体带 APP ID，Bearer 头带 API Key
+            let appID = Self.setting(Self.baiduAppIDKey) ?? ""
+            let secretKey = (KeychainStore.mailingo.get(Self.baiduSecretKeyAccount) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !appID.isEmpty, !secretKey.isEmpty else { return nil }
+            return BaiduImageTranslationService(appId: appID, secretKey: secretKey)
+        default:
+            let secretID = Self.setting(Self.imgtransSecretIDKey) ?? ""
+            let secretKey = (KeychainStore.mailingo.get(Self.imgtransSecretKeyAccount) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !secretID.isEmpty, !secretKey.isEmpty else { return nil }
+            return TencentImageTranslationService(secretId: secretID, secretKey: secretKey)
+        }
     }
 
     /// 角标点击入口：没翻过的开始翻；已翻译的切回原图。
@@ -228,7 +242,7 @@ final class InspectorModel: ObservableObject {
         guard let service = imageTranslationService else {
             imageTranslations[key] = .failed("未配置")
             // 角标本身没有弹窗能力，失败原因必须浮到状态横幅上才看得见
-            translationStatus = .failed("图片翻译还没有配置腾讯云密钥 —— 到 设置 → 翻译（图片翻译）里填写后重试。")
+            translationStatus = .failed("图片翻译还没有配置密钥 —— 到 设置 → 翻译（图片翻译）里选择厂商并填写后重试。")
             return
         }
 
@@ -239,8 +253,8 @@ final class InspectorModel: ObservableObject {
         do {
             // 取图：内联图直接取 MIME 字节；外部图（http/https）现下载 ——
             // 用户点「译」或开了自动翻译都是主动行为，不违背远程拦截的默认立场
-            let imageData: Data
-            let mimeType: String
+            var imageData: Data
+            var mimeType: String
             let lowerKey = key.lowercased()
             if lowerKey.hasPrefix("http://") || lowerKey.hasPrefix("https://") {
                 guard let url = URL(string: key) else {
@@ -264,13 +278,28 @@ final class InspectorModel: ObservableObject {
 
             trace.notice("图片翻译开始 key=\(key, privacy: .public) 原图 \(imageData.count) 字节 → \(self.targetLanguage.minimalIdentifier, privacy: .public)")
 
-            // 缓存键：图片内容的哈希 + 目标语言 + 厂商 —— 同一张图跨邮件不重复计费
-            let imageHash = TranslationCache.contentHash(of: imageData)
-            let cacheKey = CacheKey(
-                messageKey: "imgtrans.\(imageHash)",
-                targetLanguage: targetLanguage.minimalIdentifier,
-                engineID: service.id,
-                pipelineVersion: CacheKey.currentPipelineVersion
+            // 超过厂商上限就本地压缩：先限最长边（4096px），再逐级压 JPEG 质量。
+            // GIF 不压（压了也没意义，服务端会明确拒绝）。
+            if !mimeType.lowercased().contains("gif"), imageData.count > service.maxImageBytes {
+                guard let compressed = ImageCompressor.jpegData(
+                    fitting: imageData,
+                    maxBytes: service.maxImageBytes
+                ) else {
+                    throw TranslationEngineError.engineFailed(
+                        "图片压缩后仍超过大小限制（原图 \(imageData.count / 1024 / 1024)MB）"
+                    )
+                }
+                trace.notice("图片已压缩 \(imageData.count, privacy: .public) → \(compressed.count, privacy: .public) 字节")
+                imageData = compressed
+                mimeType = "image/jpeg"
+            }
+
+            // 缓存身份：内联图按**图片字节**哈希（同图跨邮件命中）；
+            // 外部图按 **URL** 哈希（重开邮件时不下载就能查缓存）
+            let (cacheKey, imageHash) = imageCacheIdentity(
+                key: key,
+                imageData: lowerKey.hasPrefix("http") ? nil : imageData,
+                service: service
             )
 
             if let cached = await TranslationCache.shared.lookup(cacheKey, sourceHash: imageHash),
@@ -283,6 +312,7 @@ final class InspectorModel: ObservableObject {
                     translatedText: cached[1]
                 )
                 guard runToken == token else { return }
+                trace.notice("图片翻译命中缓存 key=\(key, privacy: .public)")
                 translatedImageResults[key] = result
                 imageTranslations[key] = .translated
                 return
@@ -343,6 +373,70 @@ final class InspectorModel: ObservableObject {
                 await self.translateImageTask(key: key)
                 // 限频 1 次/秒
                 try? await Task.sleep(for: .seconds(1.1))
+            }
+        }
+    }
+
+    /// 图片翻译的缓存身份：消息键 + 内容指纹。
+    /// - 内联图：指纹 = **图片字节**的哈希（同一张图换封邮件照样命中）
+    /// - 外部图：指纹 = **URL** 的哈希（不下载就无法算内容哈希；URL 通常稳定）
+    private func imageCacheIdentity(
+        key: String,
+        imageData: Data?,
+        service: ImageTranslationService
+    ) -> (cacheKey: CacheKey, sourceHash: String) {
+        let fingerprint: Data
+        if key.lowercased().hasPrefix("http") {
+            fingerprint = Data(key.utf8)
+        } else if let imageData {
+            fingerprint = imageData
+        } else {
+            fingerprint = Data(key.utf8)
+        }
+        let hash = TranslationCache.contentHash(of: fingerprint)
+        let cacheKey = CacheKey(
+            messageKey: "imgtrans.\(hash)",
+            targetLanguage: targetLanguage.minimalIdentifier,
+            engineID: service.id,
+            pipelineVersion: CacheKey.currentPipelineVersion
+        )
+        return (cacheKey, hash)
+    }
+
+    /// 打开邮件后，把**缓存命中**的图片直接恢复成已翻译状态 ——
+    /// 不发任何网络请求、不花额度：之前翻过的图，重新打开就是译文。
+    /// （没命中缓存的图照常显示「译」角标，等用户手动点。）
+    private func restoreCachedImageTranslations(token: UUID) {
+        guard let analysis, let inspection, let service = imageTranslationService else { return }
+        var keys = analysis.decoded.inlineResources
+            .filter { $0.value.mimeType.lowercased().hasPrefix("image/") && !$0.value.mimeType.lowercased().contains("gif") }
+            .map(\.key)
+        if UserDefaults.standard.bool(forKey: Self.allowsRemoteContentKey) {
+            keys += RemoteContentScanner.remoteImageURLs(in: inspection.splicedHTML)
+        }
+        keys = keys.filter { imageTranslations[$0] == nil }
+
+        Task { [weak self] in
+            for key in keys {
+                guard let self, self.loadToken == token else { return }
+                let inlineData: Data? = self.analysis?.decoded.inlineResources[key]?.data
+                let (cacheKey, sourceHash) = self.imageCacheIdentity(
+                    key: key,
+                    imageData: key.lowercased().hasPrefix("http") ? nil : inlineData,
+                    service: service
+                )
+                if let cached = await TranslationCache.shared.lookup(cacheKey, sourceHash: sourceHash),
+                   let renderedBase64 = cached[0],
+                   let rendered = Data(base64Encoded: renderedBase64) {
+                    let result = TranslatedImage(
+                        imageData: rendered,
+                        mimeType: "image/jpeg",
+                        detectedText: cached[2],
+                        translatedText: cached[1]
+                    )
+                    imageTranslations[key] = .translated
+                    translatedImageResults[key] = result
+                }
             }
         }
     }
@@ -1182,6 +1276,9 @@ final class InspectorModel: ObservableObject {
         translatedImageResults = [:]
         trace.notice("load 落地 \(self.currentMessage?.id ?? "?", privacy: .public) → 界面切到这一封")
         restartTranslation(ignoringCache: ignoringCache)
+        // 清空之后，把**缓存命中**的图片直接恢复成已翻译状态 ——
+        // 之前翻过的图，重新打开就是译文，不花任何额度
+        restoreCachedImageTranslations(token: token)
     }
 
     /// 把解析挪到后台跑，并且**让它跟着当前任务一起被取消**。

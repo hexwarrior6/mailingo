@@ -24,6 +24,8 @@ public struct TranslatedImage: Sendable {
 public protocol ImageTranslationService: Sendable {
     /// 进缓存命名空间的稳定标识（厂商 + 接口版本）。
     var id: String { get }
+    /// 上传图片的大小上限（原始字节）—— 超限的图由调用方先本地压缩。
+    var maxImageBytes: Int { get }
     /// 翻译一张图片。`target` 不受支持时抛 `TranslationEngineError`。
     func translateImage(
         data: Data,
@@ -74,6 +76,9 @@ public struct TencentImageTranslationService: ImageTranslationService {
     }
 
     public var id: String { "imgtrans.tencent.v1" }
+
+    /// 接口按 Base64 后 ≤9M 判限 —— 原图留余量按 6M 压缩目标。
+    public var maxImageBytes: Int { 6_000_000 }
 
     /// 图片翻译接口支持的 18 种语言（文档口径，2026-09）。
     static let supportedLanguages: Set<String> = [

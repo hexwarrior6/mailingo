@@ -112,6 +112,7 @@ private struct TranslationSettingsView: View {
             // 已存的 Key 回显到输入框（SecureField 不回显会让用户以为没存过）
             llmAPIKeyDraft = KeychainStore.mailingo.get(InspectorModel.llmAPIKeyAccount) ?? ""
             imgtransSecretKeyDraft = KeychainStore.mailingo.get(InspectorModel.imgtransSecretKeyAccount) ?? ""
+            baiduAPIKeyDraft = KeychainStore.mailingo.get(InspectorModel.baiduSecretKeyAccount) ?? ""
         }
     }
 
@@ -175,34 +176,63 @@ private struct TranslationSettingsView: View {
         }
     }
 
-    // MARK: 图片翻译（腾讯云）
+    // MARK: 图片翻译（腾讯云 / 百度翻译）
 
-    /// SecretId 存 UserDefaults、SecretKey 存钥匙串。
+    /// SecretId / APPID 存 UserDefaults、密钥类存钥匙串。
     /// 都没配时主界面里图片角标点了会提示去设置 —— 所以这里的字段允许先空着。
     @AppStorage(InspectorModel.imgtransSecretIDKey) private var imgtransSecretID = ""
     @State private var imgtransSecretKeyDraft = ""
+    @AppStorage(InspectorModel.imgtransVendorKey) private var imgtransVendor = "tencent"
+    @AppStorage(InspectorModel.baiduAppIDKey) private var baiduAppID = ""
+    @State private var baiduAPIKeyDraft = ""
     @AppStorage(InspectorModel.autoTranslateImagesKey) private var autoTranslateImages = false
 
     private var imageTranslationSection: some View {
         Section {
-            TextField("SecretId", text: $imgtransSecretID, prompt: Text("AKIDxxxxxxxxxxxxxxxxxxxxxxxx"))
-                .autocorrectionDisabled()
-            SecureField("SecretKey", text: $imgtransSecretKeyDraft, prompt: Text("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
-                .onChange(of: imgtransSecretKeyDraft) { _, newValue in
-                    // 裁掉粘贴带进来的空白 —— 多一个换行签名就必挂
-                    KeychainStore.mailingo.set(
-                        newValue.trimmingCharacters(in: .whitespacesAndNewlines),
-                        for: InspectorModel.imgtransSecretKeyAccount
-                    )
-                }
+            Picker("服务商", selection: $imgtransVendor) {
+                Text("腾讯云（语种多）").tag("tencent")
+                Text("百度翻译（每月 1000 次免费）").tag("baidu")
+            }
+
+            if imgtransVendor == "tencent" {
+                TextField("SecretId", text: $imgtransSecretID, prompt: Text("AKIDxxxxxxxxxxxxxxxxxxxxxxxx"))
+                    .autocorrectionDisabled()
+                SecureField("SecretKey", text: $imgtransSecretKeyDraft, prompt: Text("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+                    .onChange(of: imgtransSecretKeyDraft) { _, newValue in
+                        // 裁掉粘贴带进来的空白 —— 多一个换行签名就必挂
+                        KeychainStore.mailingo.set(
+                            newValue.trimmingCharacters(in: .whitespacesAndNewlines),
+                            for: InspectorModel.imgtransSecretKeyAccount
+                        )
+                    }
+            } else {
+                TextField("APP ID", text: $baiduAppID, prompt: Text("开发者后台的 APP ID"))
+                    .autocorrectionDisabled()
+                SecureField("API Key（密钥，存入钥匙串）", text: $baiduAPIKeyDraft, prompt: Text("粘贴控制台的 API Key"))
+                    .onChange(of: baiduAPIKeyDraft) { _, newValue in
+                        KeychainStore.mailingo.set(
+                            newValue.trimmingCharacters(in: .whitespacesAndNewlines),
+                            for: InspectorModel.baiduSecretKeyAccount
+                        )
+                    }
+            }
+
             Toggle("图片自动翻译（默认手动点图片右下角的「译」）", isOn: $autoTranslateImages)
         } header: {
-            Text("图片翻译（腾讯云）")
+            Text("图片翻译")
         } footer: {
-            Text("用腾讯云「端到端图片翻译 lite」：图中文字识别、翻译并渲染回整图。SecretId / SecretKey 在腾讯云控制台「访问管理 → API 密钥」里创建，粘贴时首尾的空格换行会自动裁掉；每月有免费额度，超出按次计费。打开自动翻译后，每封邮件的内联图片会自动逐张翻译（接口限频 1 次/秒）。")
+            Text(imageTranslationFooter)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var imageTranslationFooter: String {
+        let common = "两者都是「识别 + 翻译 + 渲染回整图」。打开自动翻译后，每封邮件的图片会自动逐张翻译（腾讯限频 1 次/秒）。失败原因会显示在主窗口的状态横幅上。"
+        if imgtransVendor == "baidu" {
+            return "百度翻译图片翻译 V2.0：每月 1000 次免费，超出按次计费。支持 20 种语种（无繁体中文 / 阿拉伯语等，遇到不支持的语种可在上方切换腾讯云）。APP ID 在「开发者信息」页，API Key 在「API Keys」页创建；两者必须来自同一账号且配对使用。" + common
+        }
+        return "腾讯云端到端图片翻译（lite 档）：支持 18 种语言，每月有免费额度，超出按次计费。SecretId / SecretKey 在腾讯云控制台「访问管理 → API 密钥」里创建。" + common
     }
 }
 
