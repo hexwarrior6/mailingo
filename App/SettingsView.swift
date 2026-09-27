@@ -321,9 +321,22 @@ private struct TranslationSettingsView: View {
     }
 
     /// 删除语言包没有公开 API —— 只能跳系统设置。
+    ///
+    /// 两个坑：
+    /// 1. Ventura 起「语言与地区」是一个 Settings 扩展，面板 ID 是
+    ///    `com.apple.Localization-Settings.extension`（扩展 Info.plist 里的
+    ///    `legacyBundleIdentifier` 是 `com.apple.Localization`）。
+    ///    之前写的 `com.apple.Language-Region.settings` 并不存在 ——
+    ///    `NSWorkspace.open` 对这种 URL 照样返回 true（LaunchServices 只是把
+    ///    系统设置 App 拉起来），结果是打开一个没选中任何面板的空窗口，
+    ///    所以「兜底」也永远轮不到。
+    /// 2. 光打开面板还停在「语言与地区」，用户得自己找「翻译语言…」按钮。
+    ///    挂上 `?translation` 锚点会直接把「可供下载的语言」那张表弹出来 ——
+    ///    也就是系统里真正管理语言包的地方。
     private func openSystemLanguageSettings() {
-        let url = URL(string: "x-apple.systempreferences:com.apple.Language-Region.settings")
-        if let url, NSWorkspace.shared.open(url) { return }
+        let deepLink = "x-apple.systempreferences:com.apple.Localization-Settings.extension?translation"
+        if let url = URL(string: deepLink), NSWorkspace.shared.open(url) { return }
+        // 连系统设置都拉不起来时的兜底：只打开 App 本身。
         _ = NSWorkspace.shared.open(URL(string: "x-apple.systempreferences://")!)
     }
 
