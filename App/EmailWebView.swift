@@ -88,7 +88,12 @@ struct EmailWebView: NSViewRepresentable {
         private weak var webView: WKWebView?
 
         private var currentHTML = ""
+        /// 上一次渲染的**源 HTML** —— 用于区分「同一封邮件的增量重载」和「换了新邮件」
+        private var lastSourceHTML = ""
         private var loadedRenderedHTML: String?
+        /// 同一封邮件内的增量重载（角标/图源变化）要**恢复滚动位置**：
+        /// loadHTMLString 会把页面顶回最上面，用户正读着内容会被拽走
+        private var pendingScrollY: Double?
         private var appliedRemotePolicy: Bool?
         /// 拦截规则是否**已经真正挂到 controller 上**（注意：不是"编译好了"）。
         private var isBlockingInPlace = false
@@ -140,6 +145,34 @@ struct EmailWebView: NSViewRepresentable {
                 badges: presentation?.badges ?? [:]
             )
             guard loadedRenderedHTML != rendered else { return }
+
+            // 同一封邮件（源 HTML 未变）的增量重载 → 记住滚动位置，加载完恢复；
+            // 换了新邮件 → 正常从顶部开始。
+            // 读滚动位置用 evaluateJavaScript（页面 JS 禁用时它依然可用，公开 API）
+            let sameEmail = (currentHTML == lastSourceHTML)
+            lastSourceHTML = currentHTML
+
+            if sameEmail {
+                webView.evaluateJavaScript("window.scrollY || 0") { [weak self] result, _ in
+                    let y = (result as? Double) ?? 0
+                    DispatchQueue.main.async {
+                        self?.loadRendered(rendered, scrollToY: y)
+                    }
+                }
+            } else {
+                loadRendered(rendered, scrollToY: nil)
+            }
+        }
+
+        /// 执行一次渲染副本加载。加载时**重新推导**注入结果 ——
+        /// 等待读滚动位置期间状态可能又变了，永远加载最新的一版。
+        private func loadRendered(_ rendered: String, scrollToY: Double?) {
+            guard let webView else { return }
+            let rendered = ImageTranslationOverlay.inject(
+                into: CIDReferenceRewriter.rewrite(currentHTML),
+                badges: presentation?.badges ?? [:]
+            )
+            pendingScrollY = scrollToY
             loadedRenderedHTML = rendered
             webView.loadHTMLString(rendered, baseURL: nil)
         }
@@ -255,6 +288,22 @@ struct EmailWebView: NSViewRepresentable {
         }
 
         // MARK: WKNavigationDelegate
+
+        /// 增量重载完成后**恢复滚动位置** —— 新页面先落在顶部，这里把它拽回去。
+        /// didFinish 后 WebKit 可能还有一拍布局 —— 下一轮主循环再校准一次。
+        /// （滚动读写走 evaluateJavaScript —— 页面 JS 禁用时它依然可用，公开 API。）
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            applyScrollRestore()
+            DispatchQueue.main.async { [weak self] in
+                self?.applyScrollRestore()
+                self?.pendingScrollY = nil
+            }
+        }
+
+        private func applyScrollRestore() {
+            guard let y = pendingScrollY else { return }
+            webView?.evaluateJavaScript("window.scrollTo(0, \(y))", completionHandler: nil)
+        }
 
         /// 邮件里的链接一律交给默认浏览器打开，绝不在这个小窗格里导航走。
         /// 图片翻译的角标（`mailingo-imgtrans://`）是唯一的例外 ——
