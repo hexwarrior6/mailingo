@@ -7,7 +7,7 @@ import TranslationCore
 
 /// 设置窗口（菜单栏「Mailingo → 设置…」，⌘,）。
 ///
-/// macOS 惯例：工具栏标签页分组 —— 通用 / 翻译 / 语言包 / 缓存，
+/// macOS 惯例：工具栏标签页分组 —— 通用 / 翻译 / 缓存，
 /// 每页只放一组设置。曾经全部堆在一页里，窗口高得离谱，翻找困难。
 struct SettingsView: View {
 
@@ -21,9 +21,6 @@ struct SettingsView: View {
 
             TranslationSettingsView(model: model)
                 .tabItem { Label("翻译", systemImage: "globe") }
-
-            LanguagePacksSettingsView(model: model)
-                .tabItem { Label("语言包", systemImage: "square.and.arrow.down") }
 
             CacheSettingsView(model: model)
                 .tabItem { Label("缓存", systemImage: "internaldrive") }
@@ -91,51 +88,267 @@ private struct TranslationSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Picker("翻译引擎", selection: $model.translationEngineChoice) {
-                    ForEach(InspectorModel.TranslationEngineChoice.allCases) { choice in
-                        Text(choice.label).tag(choice)
-                    }
+                // 扁平分段子标签：**点哪个就把翻译引擎设成哪个**
+                Picker("", selection: $model.translationEngineChoice) {
+                    Text("Apple 翻译").tag(InspectorModel.TranslationEngineChoice.apple)
+                    Text("大模型翻译").tag(InspectorModel.TranslationEngineChoice.llm)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                switch model.translationEngineChoice {
+                case .apple:
+                    applePane
+                case .llm:
+                    llmPane
                 }
             } header: {
-                Text("翻译引擎")
+                Text("文本翻译")
             } footer: {
-                Text("「大模型」需要先在下方填好 API Key。缓存按引擎自动隔离 —— 换引擎不会互相覆盖。")
+                Text(translationFooter)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            llmSection
             imageTranslationSection
         }
         .formStyle(.grouped)
         .task {
-            // 已存的 Key 回显到输入框（SecureField 不回显会让用户以为没存过）
+            // 已存密钥回显到输入框（SecureField 不回显会让用户以为没存过）+
+            // 语言包清单加载（Apple 子页要用）
             llmAPIKeyDraft = KeychainStore.mailingo.get(InspectorModel.llmAPIKeyAccount) ?? ""
             imgtransSecretKeyDraft = KeychainStore.mailingo.get(InspectorModel.imgtransSecretKeyAccount) ?? ""
             baiduAPIKeyDraft = KeychainStore.mailingo.get(InspectorModel.baiduSecretKeyAccount) ?? ""
+            await refreshPacks()
+        }
+        .onChange(of: model.translationStatus) { oldValue, newValue in
+            // 语言包行数据是快照：翻译落回空闲（可能刚装好一个语言包）时重新对表
+            let wasBusy: Bool = {
+                if case .running = oldValue { return true }
+                if case .imageRunning = oldValue { return true }
+                return false
+            }()
+            if wasBusy, case .idle = newValue {
+                Task { await refreshPacks() }
+            }
         }
     }
 
-    // MARK: 大模型翻译
+    /// 文本翻译区块的页脚，随子页变化。
+    private var translationFooter: String {
+        switch model.translationEngineChoice {
+        case .apple:
+            return "语言包下载会弹出系统确认框；删除语言包没有系统接口，只能到系统设置操作。"
+        case .llm:
+            return "任何 OpenAI 兼容接口都能接。选用后邮件正文会发送给所配置的服务商；API Key 只存本机钥匙串。"
+        }
+    }
+
+    // MARK: - Apple 翻译子页（语言包管理）
+
+    /// 弹出式语言管理窗口的开关。
+    @State private var isShowingLanguageManager = false
+
+    /// 一行 = 一个系统支持的语言 + 它的安装状态。
+    private struct LanguageRow: Identifiable {
+        let language: Locale.Language
+        let status: LanguageAvailability.Status
+
+        var id: String { language.minimalIdentifier }
+    }
+
+    @State private var languageRows: [LanguageRow] = []
+    @State private var downloadingID: String?
+    @State private var packsMessage: String?
+
+    private var applePane: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("语言包已装齐的语种可直接翻译；缺的会在这里下载。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 10) {
+                Button("管理语言包…") {
+                    Task { await refreshPacks() }
+                    isShowingLanguageManager = true
+                }
+                .popover(isPresented: $isShowingLanguageManager, arrowEdge: .bottom) {
+                    languageManagerPopover
+                }
+
+                Spacer()
+            }
+
+            if let installedSummary {
+                Text(installedSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// 弹出窗口里的语言列表：原生样式（名称居左、状态/按钮居右、
+    /// 系统行距），限宽限高滚动。
+    private var languageManagerPopover: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("语言包").font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Button("刷新") {
+                    Task { await refreshPacks() }
+                }
+                .disabled(downloadingID != nil)
+                .controlSize(.small)
+                Button("在系统设置中打开…") { openSystemLanguageSettings() }
+                .controlSize(.small)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            Divider()
+
+            if languageRows.isEmpty {
+                HStack {
+                    Spacer()
+                    ProgressView().controlSize(.small)
+                    Spacer()
+                }
+                .padding(.vertical, 24)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(languageRows) { row in
+                            packRow(row)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                            Divider()
+                                .padding(.horizontal, 10)
+                        }
+                    }
+                }
+                .frame(width: 300, height: 340)
+            }
+
+            if let packsMessage {
+                Divider()
+                Text(packsMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private var installedSummary: String? {
+        guard !languageRows.isEmpty else { return nil }
+        let installed = languageRows.filter { $0.status == .installed }.count
+        let total = languageRows.filter { $0.status != .unsupported }.count
+        return "已下载 \(installed) / 共 \(total) 种语言"
+    }
+
+    private func packRow(_ row: LanguageRow) -> some View {
+        HStack {
+            Text(TranslationLanguages.displayName(for: row.language))
+            Spacer()
+            switch row.status {
+            case .installed:
+                Text("已下载")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .supported:
+                if downloadingID == row.id {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button("下载") {
+                        Task { await download(row) }
+                    }
+                    .controlSize(.small)
+                }
+            case .unsupported:
+                EmptyView()
+            }
+        }
+    }
+
+    private func refreshPacks() async {
+        await model.refreshSupportedLanguages()
+        let availability = LanguageAvailability()
+        var rows: [LanguageRow] = []
+        for language in model.supportedLanguages {
+            let status = await availability.status(from: language, to: nil)
+            rows.append(LanguageRow(language: language, status: status))
+        }
+        languageRows = rows
+    }
+
+    /// 点「下载」时**先重新查一遍本地状态**（行数据是面板快照，期间可能已
+    /// 通过别的途径装好），已装的不弹系统框。
+    private func download(_ row: LanguageRow) async {
+        downloadingID = row.id
+        defer { downloadingID = nil }
+
+        let availability = LanguageAvailability()
+        let current = await availability.status(from: row.language, to: nil)
+        if current == .installed {
+            packsMessage = "「\(TranslationLanguages.displayName(for: row.language))」已经安装过，无需重复下载。"
+            await refreshPacks()
+            return
+        }
+        guard current == .supported else {
+            packsMessage = "系统不支持下载「\(TranslationLanguages.displayName(for: row.language))」的语言包。"
+            await refreshPacks()
+            return
+        }
+
+        // 伙伴语言：挑一个已安装的语言组对，系统就只下载缺的那边
+        let partner = languageRows
+            .first { $0.status == .installed && $0.language != row.language }?
+            .language ?? model.targetLanguage
+
+        do {
+            try await AppleTranslationEngine().prepare(source: row.language, target: partner)
+            packsMessage = "已安装「\(TranslationLanguages.displayName(for: row.language))」。"
+        } catch {
+            if TranslationEngineError.isCancelledLanguagePackDownload(error) {
+                packsMessage = "已取消 —— 「\(TranslationLanguages.displayName(for: row.language))」语言包尚未安装，翻译时选到它会再次弹出下载确认框。"
+            } else {
+                packsMessage = "下载未完成：\((error as? TranslationEngineError)?.description ?? error.localizedDescription)"
+            }
+        }
+        await refreshPacks()
+    }
+
+    /// 删除语言包没有公开 API —— 只能跳系统设置。
+    private func openSystemLanguageSettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.Language-Region.settings")
+        if let url, NSWorkspace.shared.open(url) { return }
+        _ = NSWorkspace.shared.open(URL(string: "x-apple.systempreferences://")!)
+    }
+
+    // MARK: - 大模型翻译子页
 
     /// Base URL / 模型存 UserDefaults（非密钥）；Key 存钥匙串。
-    /// 字段留空时 InspectorModel 会回退到 DeepSeek 官方模板 ——
-    /// 所以用户真正必须填的只有一把 Key。
+    /// 字段留空时回退 DeepSeek 官方模板 —— 用户必填的只有一把 Key。
     @AppStorage(InspectorModel.llmBaseURLKey) private var llmBaseURL = ""
     @AppStorage(InspectorModel.llmModelKey) private var llmModel = ""
     @State private var llmAPIKeyDraft = ""
     @State private var llmMessage: String?
     @State private var isTestingConnection = false
 
-    private var llmSection: some View {
-        Section {
+    private var llmPane: some View {
+        VStack(alignment: .leading, spacing: 10) {
             TextField("Base URL", text: $llmBaseURL, prompt: Text("留空默认 https://api.deepseek.com"))
                 .autocorrectionDisabled()
             TextField("模型", text: $llmModel, prompt: Text("留空默认 deepseek-flash"))
                 .autocorrectionDisabled()
             SecureField("API Key", text: $llmAPIKeyDraft, prompt: Text("sk-xxxxxxxxxxxxxxxxxxxxxxxx"))
                 .onChange(of: llmAPIKeyDraft) { _, newValue in
-                    KeychainStore.mailingo.set(newValue, for: InspectorModel.llmAPIKeyAccount)
+                    KeychainStore.mailingo.set(
+                        newValue.trimmingCharacters(in: .whitespacesAndNewlines),
+                        for: InspectorModel.llmAPIKeyAccount
+                    )
                 }
 
             HStack(spacing: 10) {
@@ -155,12 +368,6 @@ private struct TranslationSettingsView: View {
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
-        } header: {
-            Text("大模型翻译")
-        } footer: {
-            Text("任何 OpenAI 兼容接口都能接。两个字段都留空 = 默认走 DeepSeek 官方（https://api.deepseek.com + deepseek-flash），通常只需要填 API Key。选用「大模型」引擎后，邮件正文会发送给所配置的服务商；API Key 只存在本机钥匙串。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -217,7 +424,7 @@ private struct TranslationSettingsView: View {
                     }
             }
 
-            Toggle("图片自动翻译（默认手动点图片右下角的「译」）", isOn: $autoTranslateImages)
+            Toggle("图片自动翻译（默认手动点图片右下角的「文A」）", isOn: $autoTranslateImages)
         } header: {
             Text("图片翻译")
         } footer: {
@@ -233,166 +440,6 @@ private struct TranslationSettingsView: View {
             return "百度翻译图片翻译 V2.0：每月 1000 次免费，超出按次计费。支持 20 种语种（无繁体中文 / 阿拉伯语等，遇到不支持的语种可在上方切换腾讯云）。APP ID 在「开发者信息」页，API Key 在「API Keys」页创建；两者必须来自同一账号且配对使用。" + common
         }
         return "腾讯云端到端图片翻译（lite 档）：支持 18 种语言，每月有免费额度，超出按次计费。SecretId / SecretKey 在腾讯云控制台「访问管理 → API 密钥」里创建。" + common
-    }
-}
-
-// MARK: - 语言包
-
-/// 系统语言包管理：逐语言显示安装状态，支持下载；删除没有系统接口，
-/// 只能跳转系统设置（见 openSystemLanguageSettings）。
-private struct LanguagePacksSettingsView: View {
-
-    @ObservedObject var model: InspectorModel
-
-    /// 一行 = 一个系统支持的语言 + 它的安装状态。
-    private struct LanguageRow: Identifiable {
-        let language: Locale.Language
-        let status: LanguageAvailability.Status
-
-        var id: String { language.minimalIdentifier }
-    }
-
-    @State private var languageRows: [LanguageRow] = []
-    @State private var downloadingID: String?
-    @State private var packsMessage: String?
-
-    var body: some View {
-        VStack(spacing: 12) {
-            if languageRows.isEmpty {
-                VStack {
-                    Spacer()
-                    ProgressView().controlSize(.small)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, minHeight: 200)
-            } else {
-                // 21 个语言一行行排下去会把窗口撑到一两千点高 —— 限高滚动
-                ScrollView {
-                    VStack(spacing: 2) {
-                        ForEach(languageRows) { packRow($0) }
-                    }
-                    .padding(.horizontal, 12)
-                }
-                .frame(minHeight: 200, maxHeight: 430)
-            }
-
-            HStack(spacing: 10) {
-                Button("刷新") {
-                    Task { await refreshPacks() }
-                }
-                .disabled(downloadingID != nil)
-
-                Button("在系统设置中打开…") { openSystemLanguageSettings() }
-
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-
-            if let packsMessage {
-                Text(packsMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 12)
-        .frame(width: 480)
-        .task { await refreshPacks() }
-        .onChange(of: model.translationStatus) { oldValue, newValue in
-            // 行数据是快照，而语言包还有一条**不经过本面板**的安装途径：
-            // 主窗口里翻译时弹的系统下载框。所以每次翻译从「进行中」落回
-            // 「空闲」（那可能刚装好一个包），就把整张表重新对一遍。
-            if case .running = oldValue, case .idle = newValue {
-                Task { await refreshPacks() }
-            }
-        }
-    }
-
-    private func packRow(_ row: LanguageRow) -> some View {
-        LabeledContent {
-            switch row.status {
-            case .installed:
-                // 装好的就是一个「勾」—— 不是下载按钮，也不该再触发下载
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                    .help("已安装")
-            case .supported:
-                if downloadingID == row.id {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Button("下载") {
-                        Task { await download(row) }
-                    }
-                }
-            case .unsupported:
-                EmptyView()
-            }
-        } label: {
-            Text(TranslationLanguages.displayName(for: row.language))
-        }
-    }
-
-    private func refreshPacks() async {
-        await model.refreshSupportedLanguages()
-        let availability = LanguageAvailability()
-        // status 逐语言异步查 —— 21 个语言的查询在可感知时间内能跑完
-        var rows: [LanguageRow] = []
-        for language in model.supportedLanguages {
-            let status = await availability.status(from: language, to: nil)
-            rows.append(LanguageRow(language: language, status: status))
-        }
-        languageRows = rows
-    }
-
-    /// 触发一个语言的下载：借 `prepareTranslation()` 弹系统的确认框。
-    private func download(_ row: LanguageRow) async {
-        downloadingID = row.id
-        defer { downloadingID = nil }
-
-        // 点「下载」时**先重新查一遍本地状态**：行数据是面板打开那一刻的
-        // 快照，期间完全可能已经通过别的途径装好了（比如在主窗口切换语言对
-        // 时弹的系统下载框里点过确认）。已装的语言再 prepare 一遍，
-        // 会白白弹一次系统确认框 —— 那正是"明明装过了还让我下载"。
-        let availability = LanguageAvailability()
-        let current = await availability.status(from: row.language, to: nil)
-        if current == .installed {
-            packsMessage = "「\(TranslationLanguages.displayName(for: row.language))」已经安装过，无需重复下载。"
-            await refreshPacks()
-            return
-        }
-        guard current == .supported else {
-            packsMessage = "系统不支持下载「\(TranslationLanguages.displayName(for: row.language))」的语言包。"
-            await refreshPacks()
-            return
-        }
-
-        // 伙伴语言：挑一个**已安装**的语言组对，系统就只会下载缺的那边；
-        // 一个已安装的都没有时退回当前目标语言（缺什么系统会一起列出来）。
-        let partner = languageRows
-            .first { $0.status == .installed && $0.language != row.language }?
-            .language ?? model.targetLanguage
-
-        do {
-            try await AppleTranslationEngine().prepare(source: row.language, target: partner)
-            packsMessage = "已安装「\(TranslationLanguages.displayName(for: row.language))」。"
-        } catch {
-            if TranslationEngineError.isCancelledLanguagePackDownload(error) {
-                packsMessage = "已取消 —— 「\(TranslationLanguages.displayName(for: row.language))」语言包尚未安装，翻译时选到它会再次弹出下载确认框。"
-            } else {
-                packsMessage = "下载未完成：\((error as? TranslationEngineError)?.description ?? error.localizedDescription)"
-            }
-        }
-        await refreshPacks()
-    }
-
-    /// 删除语言包没有公开 API（macOS 15/26 都没有），只能把用户带到系统设置。
-    /// 深链标识符随系统版本可能变化，失败就退回打开系统设置主面板。
-    private func openSystemLanguageSettings() {
-        let url = URL(string: "x-apple.systempreferences:com.apple.Language-Region.settings")
-        if let url, NSWorkspace.shared.open(url) { return }
-        _ = NSWorkspace.shared.open(URL(string: "x-apple.systempreferences://")!)
     }
 }
 
