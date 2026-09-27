@@ -68,6 +68,8 @@ final class InspectorModel: ObservableObject {
     enum TranslationStatus: Equatable {
         case idle
         case running(done: Int, total: Int)
+        /// 图片翻译进行中（角标不变化，反馈走横幅——避免一次整页重载）
+        case imageRunning
         case failed(String)
     }
 
@@ -247,6 +249,9 @@ final class InspectorModel: ObservableObject {
         }
 
         imageTranslations[key] = .running
+        // 进行中不再改动角标（改了就触发整页重载）—— 反馈走横幅
+        imageRunningCount += 1
+        translationStatus = .imageRunning
         let token = runToken
         let started = Date()
 
@@ -315,6 +320,7 @@ final class InspectorModel: ObservableObject {
                 trace.notice("图片翻译命中缓存 key=\(key, privacy: .public)")
                 translatedImageResults[key] = result
                 imageTranslations[key] = .translated
+                imageTranslationDidFinish(success: true)
                 return
             }
 
@@ -326,6 +332,7 @@ final class InspectorModel: ObservableObject {
             try Task.checkCancellation()
             guard runToken == token else { return }
             trace.notice("图片翻译完成 key=\(key, privacy: .public) 渲染图 \(result.imageData.count) 字节 耗时 \(String(format: "%.1f", Date().timeIntervalSince(started)), privacy: .public)s 识别:\(String((result.detectedText ?? "").prefix(40)), privacy: .public) 译文:\(String((result.translatedText ?? "").prefix(40)), privacy: .public)")
+            imageTranslationDidFinish(success: true)
 
             translatedImageResults[key] = result
             imageTranslations[key] = .translated
@@ -343,10 +350,13 @@ final class InspectorModel: ObservableObject {
             await TranslationCache.shared.purge(policy: cachePolicy)
         } catch is CancellationError {
             if runToken == token { imageTranslations[key] = nil }
+            imageTranslationDidFinish(success: false)
+            if imageRunningCount <= 0 { translationStatus = .idle }
         } catch {
             guard runToken == token else { return }
             imageTranslations[key] = .failed((error as? TranslationEngineError)?.description ?? error.localizedDescription)
             // 失败原因浮到横幅上 —— 角标自己只会弹回「译」，光看图不知道发生了什么
+            imageTranslationDidFinish(success: false)
             translationStatus = .failed("图片翻译失败：\((error as? TranslationEngineError)?.description ?? error.localizedDescription)")
         }
     }
@@ -401,6 +411,19 @@ final class InspectorModel: ObservableObject {
             pipelineVersion: CacheKey.currentPipelineVersion
         )
         return (cacheKey, hash)
+    }
+
+    /// 正在翻译的图片数量 —— 归零时把横幅交还给空闲状态。
+    private var imageRunningCount = 0
+
+    private func imageTranslationDidFinish(success: Bool) {
+        imageRunningCount -= 1
+        if imageRunningCount > 0 {
+            translationStatus = .imageRunning
+        } else if success {
+            translationStatus = .idle
+        }
+        // 失败路径的横幅由调用方用具体错误覆盖
     }
 
     /// 打开邮件后，把**缓存命中**的图片直接恢复成已翻译状态 ——

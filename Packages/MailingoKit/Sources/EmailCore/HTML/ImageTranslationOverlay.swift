@@ -38,13 +38,35 @@ public enum ImageTranslationOverlay {
         /// 已翻译（图已是渲染译文）：点它切回原图
         case restore
 
+        /// 角标文字。**刻意不用中文**（「译/原」只有中文用户看得懂）——
+        /// 「文A」是 Google/微软等图片翻译产品通用的标志：
+        /// 拉丁字母 + CJK 字母并排，任何语言的使用者都能认出是"翻译"。
+        /// 翻译中用 **SMIL 旋转 loader**（SVG 内嵌动画，无需 JS —— 邮件页禁 JS）。
         var label: String {
             switch self {
-            case .translate: "译"
-            case .busy: "…"
-            case .restore: "原"
+            case .translate: "文A"
+            case .busy: Self.busySpinner
+            case .restore: "↺"
             }
         }
+
+        /// 悬停提示，双语。
+        var tooltip: String {
+            switch self {
+            case .translate: "翻译图片 / Translate image"
+            case .busy: "翻译中… / Translating…"
+            case .restore: "还原原图 / Show original image"
+            }
+        }
+
+        /// 旋转 loader：SVG SMIL 动画（WebKit 原生支持，不依赖页面 JS）。
+        /// 用双井号原始字符串 —— stroke="#ffffff" 里的 `"#` 会截断单井号串。
+        private static let busySpinner =
+            ##"<svg width="16" height="16" viewBox="0 0 24 24" style="display:block;margin:4px auto 0;">"##
+            + ##"<circle cx="12" cy="12" r="9" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="3"></circle>"##
+            + ##"<path d="M12 3 a9 9 0 0 1 9 9" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round">"##
+            + ##"<animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite"></animateTransform>"##
+            + ##"</path></svg>"##
     }
 
     /// 给图片注入角标。`badges` 按**图源键**索引（内联 = Content-ID，
@@ -213,6 +235,7 @@ public enum ImageTranslationOverlay {
         "position:relative!important;display:inline-block!important;line-height:0!important;"
 
     private static func badgeAnchor(key: String, badge: Badge) -> String {
-        #"<a href="\#(actionURLString(forContentID: key))" style="position:absolute!important;right:6px!important;bottom:6px!important;display:inline-block!important;min-width:24px!important;height:24px!important;padding:0 7px!important;border-radius:12px!important;background:rgba(20,20,20,0.55)!important;color:#fff!important;font:600 12px/24px -apple-system,'Helvetica Neue',sans-serif!important;text-align:center!important;text-decoration:none!important;-webkit-user-select:none!important;">\#(badge.label)</a>"#
+        // 正圆（24×24、border-radius 50%）：文字紧凑、去内边距与字距
+        return #"<a href="\#(actionURLString(forContentID: key))" title="\#(badge.tooltip)" style="position:absolute!important;right:6px!important;bottom:6px!important;display:inline-block!important;width:24px!important;height:24px!important;padding:0!important;border-radius:50%!important;background:rgba(20,20,20,0.55)!important;color:#fff!important;font:600 10px/24px -apple-system,'Helvetica Neue',sans-serif!important;text-align:center!important;text-decoration:none!important;-webkit-user-select:none!important;letter-spacing:-0.5px!important;">\#(badge.label)</a>"#
     }
 }

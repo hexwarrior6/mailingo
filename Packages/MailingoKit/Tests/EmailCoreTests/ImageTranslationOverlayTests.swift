@@ -24,7 +24,7 @@ final class ImageTranslationOverlayTests: XCTestCase {
         let out = ImageTranslationOverlay.inject(into: html, badges: [cid: .translate])
 
         XCTAssertTrue(out.contains(#"href="mailingo-imgtrans://\#(encodedCid)""#), "角标 href 应指向翻译动作")
-        XCTAssertTrue(out.contains(">译</a>"))
+        XCTAssertTrue(out.contains(">文A</a>"))
         XCTAssertTrue(out.contains(#"<span style="position:relative!"#), "装饰层应有定位样式")
         XCTAssertTrue(out.contains(img()), "原图标签原样保留")
     }
@@ -35,14 +35,15 @@ final class ImageTranslationOverlayTests: XCTestCase {
 
         XCTAssertTrue(out.contains("mailingo-imgout://\(encodedCid)"), "已翻译的图源必须换成译文 scheme（绕开 WebKit 缓存）")
         XCTAssertFalse(out.contains("mailingo-cid://\(encodedCid)"), "不应再引用原图 scheme")
-        XCTAssertTrue(out.contains(">原</a>"))
+        XCTAssertTrue(out.contains(">↺</a>"))
     }
 
-    func testBusyBadgeKeepsOriginalSource() {
+    func testBusyBadgeShowsSpinnerAndKeepsOriginalSource() {
         let html = #"<p>\#(img())</p>"#
         let out = ImageTranslationOverlay.inject(into: html, badges: [cid: .busy])
 
-        XCTAssertTrue(out.contains(">…</a>"))
+        // 翻译中：SMIL 旋转 loader（SVG 动画，无需页面 JS）
+        XCTAssertTrue(out.contains("<animateTransform"), "翻译中应为旋转 loader")
         XCTAssertTrue(out.contains("mailingo-cid://\(encodedCid)"), "翻译中不应改动图源")
     }
 
@@ -92,7 +93,7 @@ final class ImageTranslationOverlayTests: XCTestCase {
 
         XCTAssertTrue(out.contains(#"<a href="https://shop.example/promo">"#), "跳转链接必须原样保留")
         XCTAssertTrue(out.contains("</a><a href=\"mailingo-imgtrans"), "角标应为锚点的兄弟（非嵌套）")
-        XCTAssertTrue(out.contains(">译</a>"))
+        XCTAssertTrue(out.contains(">文A</a>"))
     }
 
     func testRemoteImageRestoreRewritesWholeSourceValue() {
@@ -103,7 +104,7 @@ final class ImageTranslationOverlayTests: XCTestCase {
 
         XCTAssertTrue(out.contains("mailingo-imgout://https%3A%2F%2Fcdn.example%2Fpic.png%3Fw%3D600%26h%3D400"), "src 应整体换成 imgout URL")
         XCTAssertFalse(out.contains("https://cdn.example/pic.png?w=600"), "不应再引用远程原图")
-        XCTAssertTrue(out.contains(">原</a>"))
+        XCTAssertTrue(out.contains(">↺</a>"))
     }
 
     // MARK: - 多图

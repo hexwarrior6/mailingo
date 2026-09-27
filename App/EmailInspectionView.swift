@@ -261,6 +261,16 @@ struct EmailInspectionView: View {
             .padding(.vertical, 6)
             .background(Color.blue.opacity(0.08))
 
+        case .imageRunning:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("图片翻译中…").font(.caption)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.blue.opacity(0.08))
+
         case .failed(let message):
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
@@ -523,9 +533,10 @@ struct EmailInspectionView: View {
         }
         for (key, state) in model.imageTranslations {
             switch state {
+            // 翻译中角标变旋转 loader —— 滚动位置由 EmailWebView 的恢复机制保证
             case .running: badges[key] = .busy
-            case .translated: badges[key] = .restore
             case .failed: badges[key] = .translate
+            case .translated: badges[key] = .restore
             }
         }
         return EmailWebView.ImageTranslationPresentation(

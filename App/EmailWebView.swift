@@ -92,8 +92,16 @@ struct EmailWebView: NSViewRepresentable {
         private var lastSourceHTML = ""
         private var loadedRenderedHTML: String?
         /// 同一封邮件内的增量重载（角标/图源变化）要**恢复滚动位置**：
-        /// loadHTMLString 会把页面顶回最上面，用户正读着内容会被拽走
-        private var pendingScrollY: Double?
+        /// loadHTMLString 会把页面顶回最上面，用户正读着内容会被拽走。
+        /// 横向也要存 —— 宽表格/海报图的横向滚动位置一样会丢。
+        private var pendingScroll: CGPoint?
+        /// 恢复的定时重申 —— didFinish 时布局往往还没定型（图片解码、远程图
+        /// 重新加载），只恢复一次会被后续布局变化漂走；分几个时间点反复钉回。
+        /// 用户一旦开始滚动（滚轮/触控板事件），立刻停止钉位——
+        /// 钉位是帮用户稳住页面，不是和他抢滚动条。
+        private var scrollRestoreWork: [DispatchWorkItem] = []
+        private var scrollEventMonitor: Any?
+        private var userScrolledDuringRestore = false
         private var appliedRemotePolicy: Bool?
         /// 拦截规则是否**已经真正挂到 controller 上**（注意：不是"编译好了"）。
         private var isBlockingInPlace = false
@@ -101,6 +109,11 @@ struct EmailWebView: NSViewRepresentable {
         init(inlineResources: [String: InlineResource], presentation: ImageTranslationPresentation?) {
             self.inlineResources = inlineResources
             self.presentation = presentation
+        }
+
+        deinit {
+            // 恢复窗口期的滚轮监听随协调器一起摘除
+            stopUserScrollMonitor()
         }
 
         func attach(_ webView: WKWebView) {
@@ -153,26 +166,29 @@ struct EmailWebView: NSViewRepresentable {
             lastSourceHTML = currentHTML
 
             if sameEmail {
-                webView.evaluateJavaScript("window.scrollY || 0") { [weak self] result, _ in
-                    let y = (result as? Double) ?? 0
+                webView.evaluateJavaScript("[window.scrollX, window.scrollY]") { [weak self] result, _ in
+                    var point = CGPoint.zero
+                    if let array = result as? [Double], array.count == 2 {
+                        point = CGPoint(x: array[0], y: array[1])
+                    }
                     DispatchQueue.main.async {
-                        self?.loadRendered(rendered, scrollToY: y)
+                        self?.loadRendered(rendered, scrollTo: point)
                     }
                 }
             } else {
-                loadRendered(rendered, scrollToY: nil)
+                loadRendered(rendered, scrollTo: nil)
             }
         }
 
         /// 执行一次渲染副本加载。加载时**重新推导**注入结果 ——
         /// 等待读滚动位置期间状态可能又变了，永远加载最新的一版。
-        private func loadRendered(_ rendered: String, scrollToY: Double?) {
+        private func loadRendered(_ rendered: String, scrollTo point: CGPoint?) {
             guard let webView else { return }
             let rendered = ImageTranslationOverlay.inject(
                 into: CIDReferenceRewriter.rewrite(currentHTML),
                 badges: presentation?.badges ?? [:]
             )
-            pendingScrollY = scrollToY
+            pendingScroll = point
             loadedRenderedHTML = rendered
             webView.loadHTMLString(rendered, baseURL: nil)
         }
@@ -294,15 +310,55 @@ struct EmailWebView: NSViewRepresentable {
         /// （滚动读写走 evaluateJavaScript —— 页面 JS 禁用时它依然可用，公开 API。）
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             applyScrollRestore()
-            DispatchQueue.main.async { [weak self] in
-                self?.applyScrollRestore()
-                self?.pendingScrollY = nil
+            scheduleScrollRestoration()
+        }
+
+        /// 布局随图片解码/远程图加载仍在变化 —— 分几个时间点反复钉回，
+        /// 直到布局稳定**或用户开始滚动**（监听到第一个滚轮事件就收手，
+        /// 钉位是帮用户稳住页面，不是和他抢滚动条）。新调度取消旧定时器。
+        private func scheduleScrollRestoration() {
+            scrollRestoreWork.forEach { $0.cancel() }
+            scrollRestoreWork = []
+            userScrolledDuringRestore = false
+            startUserScrollMonitor()
+
+            scrollRestoreWork = [0.1, 0.3, 0.6, 1.0].map { delay in
+                let work = DispatchWorkItem { [weak self] in
+                    guard let self else { return }
+                    defer { if delay >= 1.0 { self.stopUserScrollMonitor() } }
+                    guard !userScrolledDuringRestore else { return }
+                    applyScrollRestore()
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+                return work
             }
         }
 
         private func applyScrollRestore() {
-            guard let y = pendingScrollY else { return }
-            webView?.evaluateJavaScript("window.scrollTo(0, \(y))", completionHandler: nil)
+            guard let point = pendingScroll else { return }
+            webView?.evaluateJavaScript(
+                "window.scrollTo(\(point.x), \(point.y))",
+                completionHandler: nil
+            )
+        }
+
+        // MARK: 用户滚动监听
+
+        private func startUserScrollMonitor() {
+            guard scrollEventMonitor == nil else { return }
+            userScrolledDuringRestore = false
+            scrollEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                self?.userScrolledDuringRestore = true
+                self?.stopUserScrollMonitor()
+                return event
+            }
+        }
+
+        private func stopUserScrollMonitor() {
+            if let monitor = scrollEventMonitor {
+                NSEvent.removeMonitor(monitor)
+                scrollEventMonitor = nil
+            }
         }
 
         /// 邮件里的链接一律交给默认浏览器打开，绝不在这个小窗格里导航走。
