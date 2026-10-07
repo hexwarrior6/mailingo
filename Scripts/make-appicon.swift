@@ -69,12 +69,20 @@ var artPath: String?
 var bakeShadow = true
 var makePreview = true
 var shrinkPercent = 100.0
+var cropPercent = 100.0
 var i = 0
 while i < args.count {
     let a = args[i]
     switch a {
     case "--flat":        bakeShadow = false
     case "--no-preview":  makePreview = false
+    case "--crop":
+        guard i + 1 < args.count, let v = Double(args[i + 1]), v > 0, v <= 100 else {
+            FileHandle.standardError.write("❌ --crop 需要一个大于 0 且不超过 100 的数值\n".data(using: .utf8)!)
+            exit(2)
+        }
+        cropPercent = v
+        i += 1
     case "--shrink":
         guard i + 1 < args.count, let v = Double(args[i + 1]), v > 0, v <= 100 else {
             FileHandle.standardError.write("❌ --shrink 需要一个 1…100 的数值\n".data(using: .utf8)!)
@@ -94,14 +102,15 @@ while i < args.count {
 
 guard let artPath else {
     FileHandle.standardError.write("""
-    用法：swift Scripts/make-appicon.swift <画稿.png> [--shrink 100] [--flat] [--no-preview]
+    用法：swift Scripts/make-appicon.swift <画稿.png> [--crop 100] [--shrink 100] [--flat] [--no-preview]
 
       画稿.png      方形图片（1024 或更大最好；非正方形会居中裁成正方形）
+      --crop N      居中保留画稿的 N%，裁掉外围背景；默认 100（不裁剪）。
       --shrink N    把画稿缩到画布的 N% 并居中，四周用边缘延展补背景。
                     默认 100（不动）。**主体画得太满时用这个还呼吸感** ——
                     App 图标的形状只占画布 824/1024，四周 100px 天然看不见，
                     所以主体占满画布的画稿套上蒙版后会显得贴边。
-                    实测本项目的画稿用 88 比较合适。
+                    主体留白较少时可按预览调整。
       --flat        不烘焙投影（默认烘焙，与 Apple 自带图标一致）
       --no-preview  不生成小尺寸/明暗对照图
 
@@ -275,7 +284,15 @@ if artImage.width < canvasSize {
     print("⚠️  画稿只有 \(artImage.width)px，放大到 \(canvasSize)px 会变糊，建议重新生成更大的")
 }
 
-let squared = centerCropped(artImage)
+let squareSource = centerCropped(artImage)
+let cropSide = max(1, Int((Double(squareSource.width) * cropPercent / 100).rounded()))
+let cropOffset = (squareSource.width - cropSide) / 2
+let squared = squareSource.cropping(to: CGRect(
+    x: cropOffset, y: cropOffset, width: cropSide, height: cropSide
+)) ?? squareSource
+if cropPercent < 100 {
+    print("· 画稿已居中裁取 \(cropPercent)%（\(cropSide)×\(cropSide)）")
+}
 guard var art = shrunkToCanvas(squared, percent: shrinkPercent) else {
     FileHandle.standardError.write("❌ 无法把画稿转成像素缓冲\n".data(using: .utf8)!)
     exit(1)

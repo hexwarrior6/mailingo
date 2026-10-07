@@ -19,7 +19,7 @@ help:
 	@echo "make build      编译（含 appex 嵌入）"
 	@echo "make test       跑 EmailCore 单元测试（23 个）"
 	@echo "make appicon    从 ART=<画稿.png> 生成 App 图标（可加 SHRINK=88）"
-	@echo "make appicon-project  用项目画稿重新生成正式图标（SHRINK=88）"
+	@echo "make appicon-project  用项目画稿重新生成正式图标（CROP=80）"
 	@echo "make run        编译并启动容器 App（探针看板）"
 	@echo "make register   向 pluginkit 注册 appex，并列出 Mail 扩展"
 	@echo "make status     打印 S0 判定摘要"
@@ -91,13 +91,13 @@ appicon:
 	@TMPDIR="$(SPMDIR)/tmp" swift \
 	  -module-cache-path "$(CURDIR)/.build/swiftcache" \
 	  -sdk "$$(xcrun --show-sdk-path --sdk macosx)" \
-	  Scripts/make-appicon.swift "$(ART)" $(if $(SHRINK),--shrink $(SHRINK),)
+	  Scripts/make-appicon.swift "$(ART)" $(if $(CROP),--crop $(CROP),) $(if $(SHRINK),--shrink $(SHRINK),)
 	@echo "→ 接着跑 make gen && make build"
 
-# 本项目正式用的那份图标（SHRINK=88，理由见 README「App 图标」）。
+# 本项目正式用的那份图标（CROP=80，理由见 README「App 图标」）。
 # 画稿换新时跑这一条即可。
 appicon-project:
-	@$(MAKE) --no-print-directory appicon ART=Design/AppIcon.png SHRINK=88
+	@$(MAKE) --no-print-directory appicon ART=Design/AppIcon.png CROP=80
 
 test:
 	@mkdir -p "$(SPMDIR)/tmp" "$(SPMDIR)/mc"
