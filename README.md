@@ -242,6 +242,7 @@ make diagnose      # 地面真相：os_log + appex 是否被拉起 + 注册情�
 | `make gen` | 由 `project.yml` 生成 `Mailingo.xcodeproj` |
 | `make build` | 编译（含 appex 嵌入与签名） |
 | `make test` | 跑单元测试（106 个，不需要证书、不到一秒） |
+| `make check-message-store` | 验证多版本邮件与旧翻译横幅的定位、淘汰清理（隔离测试目录） |
 | `make check-render` | 渲染冒烟检查：真的跑一遍 WKWebView，确认 `cid:` 内嵌图能显示 |
 | `make verify-appex` | 校验 appex 是可加载的真扩展，而不是空壳 |
 | `make install-app` | 构建 + 校验 + 装到 `/Applications` + 重新注册 |

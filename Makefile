@@ -11,9 +11,10 @@ LOG      := $(LOGDIR)/probe.log
 SPMDIR   := $(CURDIR)/.build/spm
 
 
-.PHONY: help bootstrap gen build test check-render check-reply-quotes run register status log stream diagnose clean reset-log install-app verify-appex refresh-plugins appicon appicon-project
+.PHONY: help bootstrap gen build test check-render check-reply-quotes check-message-store run register status log stream diagnose clean reset-log install-app verify-appex refresh-plugins appicon appicon-project
 
 help:
+	@echo "make check-message-store 验证多版本邮件与旧翻译横幅的定位和清理"
 	@echo "make check-reply-quotes  验证引用折叠、展开和重载状态（真实 WebKit）"
 	@echo "make bootstrap  下载 XcodeGen 到 .tools/（无需 sudo，固定版本；克隆后先跑这个）"
 	@echo "make gen        生成 Mailingo.xcodeproj（XcodeGen）"
@@ -106,6 +107,18 @@ appicon:
 # 画稿换新时跑这一条即可。
 appicon-project:
 	@$(MAKE) --no-print-directory appicon ART=Design/AppIcon.png CROP=80
+
+check-message-store:
+	@mkdir -p "$(CURDIR)/.build/message-store-check" "$(CURDIR)/.build/swiftcache"
+	swiftc -module-cache-path "$(CURDIR)/.build/swiftcache" -emit-library -emit-module -module-name EmailCore \
+	  Packages/MailingoKit/Sources/EmailCore/MIME/MIMEHeaders.swift \
+	  -emit-module-path "$(CURDIR)/.build/message-store-check/EmailCore.swiftmodule" \
+	  -o "$(CURDIR)/.build/message-store-check/libEmailCore.dylib"
+	swiftc -module-cache-path "$(CURDIR)/.build/swiftcache" \
+	  -I "$(CURDIR)/.build/message-store-check" -L "$(CURDIR)/.build/message-store-check" -lEmailCore \
+	  -Xlinker -rpath -Xlinker "$(CURDIR)/.build/message-store-check" \
+	  Shared/MessageStore.swift Scripts/check-message-store.swift -o "$(CURDIR)/.build/message-store-check/check"
+	"$(CURDIR)/.build/message-store-check/check"
 
 test:
 	@mkdir -p "$(SPMDIR)/tmp" "$(SPMDIR)/mc"

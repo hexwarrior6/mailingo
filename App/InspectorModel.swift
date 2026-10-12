@@ -819,15 +819,14 @@ final class InspectorModel: ObservableObject {
     ) async {
         if manual { followSuppressed = true }
 
-        let stored = capturedMessages.first { $0.id == messageID }
-            ?? MessageStore.all().first { $0.id == messageID }
+        let stored = MessageStore.message(id: messageID)
 
         guard let stored else {
             guard loadToken == token else { return }
             state = .failed("找不到邮件 \(messageID)，可能已经被清理掉了。")
             return
         }
-        guard let raw = MessageStore.rawMessage(id: messageID) else {
+        guard let raw = MessageStore.rawMessage(id: stored.id) else {
             guard loadToken == token else { return }
             state = .failed("邮件 \(messageID) 的原始内容读不出来。")
             return

@@ -73,12 +73,13 @@ public enum MessageStore {
             capturedAt: Date()
         )
 
-        // 同一封邮件的旧版本（通常是"附件未下载"的空壳）直接删掉，
-        // 免得目录里越积越多。all() 已经会去重，这里是为了不占磁盘。
+        // 删除旧版本的 MIME，但保留元数据作为旧横幅 ID 到 Message-ID 的映射。
+        // Mail 仍可能显示旧横幅；不能让它因完整版到达而失效。
         if let messageID = message.internetMessageID, !messageID.isEmpty {
             for stale in all()
-            where stale.internetMessageID == messageID && stale.byteCount < message.byteCount {
-                removeFiles(id: stale.id)
+            where MIMEHeaders.normalizeMessageID(stale.internetMessageID ?? "") == MIMEHeaders.normalizeMessageID(messageID)
+                && stale.byteCount < message.byteCount {
+                try? FileManager.default.removeItem(at: SharedPaths.messages.appendingPathComponent("\(stale.id).eml"))
             }
         }
 
@@ -122,32 +123,26 @@ public enum MessageStore {
     /// 这里按 `Message-ID` 归组，**保留字节数最多的那份**（最完整）。
     /// 没有 Message-ID 的邮件无法归组，各自保留。
     public static func all() -> [StoredMessage] {
-        let directory = SharedPaths.messages
-        guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil
-        ) else { return [] }
-
-        let decoder = JSONDecoder.messages
-        let stored = entries
-            .filter { $0.pathExtension == "json" }
-            .compactMap { url -> StoredMessage? in
-                guard let data = try? Data(contentsOf: url) else { return nil }
-                return try? decoder.decode(StoredMessage.self, from: data)
-            }
+        let stored = metadata().filter {
+            FileManager.default.fileExists(atPath: SharedPaths.messages.appendingPathComponent("\($0.id).eml").path)
+        }
 
         var bestByMessageID: [String: StoredMessage] = [:]
         var ungrouped: [StoredMessage] = []
 
         for message in stored {
-            guard let key = message.internetMessageID, !key.isEmpty else {
+            let key = MIMEHeaders.normalizeMessageID(message.internetMessageID ?? "")
+            guard !key.isEmpty else {
                 ungrouped.append(message)
                 continue
             }
             if let existing = bestByMessageID[key] {
+                // 最近读到的小版本也代表这封邮件仍在使用，不能沿用大版本的旧时间。
+                let capturedAt = max(existing.capturedAt, message.capturedAt)
                 if message.byteCount > existing.byteCount {
                     bestByMessageID[key] = message
                 }
+                bestByMessageID[key]?.capturedAt = capturedAt
             } else {
                 bestByMessageID[key] = message
             }
@@ -155,6 +150,33 @@ public enum MessageStore {
 
         return (Array(bestByMessageID.values) + ungrouped)
             .sorted { $0.capturedAt > $1.capturedAt }
+    }
+
+    /// 内容版本 ID 可能不在去重后的列表中；先读取它的身份，再定位可用版本。
+    public static func message(id: String, internetMessageID: String? = nil) -> StoredMessage? {
+        let exact = metadata().first { $0.id == id }
+        if let identity = exact?.internetMessageID ?? internetMessageID,
+           let best = message(matchingInternetMessageID: identity) {
+            return best
+        }
+        guard let exact, rawMessage(id: exact.id) != nil else { return nil }
+        return exact
+    }
+
+    private static func metadata() -> [StoredMessage] {
+        let directory = SharedPaths.messages
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else { return [] }
+
+        let decoder = JSONDecoder.messages
+        return entries
+            .filter { $0.pathExtension == "json" }
+            .compactMap { url -> StoredMessage? in
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                return try? decoder.decode(StoredMessage.self, from: data)
+            }
     }
 
     /// 按 Message-ID 找一封邮件（比较前会归一化尖括号）。
@@ -233,7 +255,11 @@ public enum MessageStore {
         guard messages.count > maxStoredMessages else { return }
 
         for message in messages[maxStoredMessages...] {
-            removeFiles(id: message.id)
+            let identity = MIMEHeaders.normalizeMessageID(message.internetMessageID ?? "")
+            for version in metadata() where version.id == message.id ||
+                (!identity.isEmpty && MIMEHeaders.normalizeMessageID(version.internetMessageID ?? "") == identity) {
+                removeFiles(id: version.id)
+            }
         }
     }
 }

@@ -2,6 +2,10 @@
 
 > 本文是实现 `docs/PRODUCT.md` 的技术方案。所有"已核实"结论均来自本机 SDK 头文件、Mail 的 sdef 以及真机实验，不是推测。
 
+## 邮件翻译入口修复（2026-10-12）
+
+- 修正横幅的内容版本 ID 与邮件列表去重之间的冲突：请求先通过版本元数据找到逻辑 Message-ID，再载入最完整的可用 MIME。删除旧 MIME 时保留版本身份映射，淘汰整封邮件时一起清理；新横幅 context 同时携带 Message-ID，兼容旧 context。App 的 URL / 待处理请求也使用同一解析入口。`make check-message-store` 在隔离目录验证多版本交付、旧横幅、身份兜底及淘汰清理。
+
 ## 当前邮件翻译范围（2026-10-12）
 
 - 在片段提取阶段排除客户端明确标记的引用历史：Apple Mail `blockquote[type=cite]`、Gmail/Yahoo/Proton 引用容器、Outlook `divRplyFwdMsg` / `appendonsend` 后的历史。

@@ -102,7 +102,7 @@ final class TranslationSecurityHandler: NSObject, MEMessageSecurityHandler {
         return MEDecodedMessage(
             data: data,
             securityInformation: securityInfo,
-            context: Self.contextData(messageID: stored.id),
+            context: Self.contextData(message: stored),
             banner: banner
         )
     }
@@ -173,7 +173,8 @@ final class TranslationSecurityHandler: NSObject, MEMessageSecurityHandler {
             ProbeLog.shared.record("★ \(reason) context 里没有 id，退化为最近一封")
             return MessageStore.mostRecent()
         }
-        guard let message = MessageStore.all().first(where: { $0.id == id }) else {
+        let identity = (try? JSONSerialization.jsonObject(with: context) as? [String: String])?["internetMessageID"]
+        guard let message = MessageStore.message(id: id, internetMessageID: identity) else {
             ProbeLog.shared.record("★ \(reason) id=\(id) 但仓库里找不到对应邮件")
             return nil
         }
@@ -191,8 +192,10 @@ final class TranslationSecurityHandler: NSObject, MEMessageSecurityHandler {
         ProbeLog.shared.record("   唤醒容器 App：\(opened ? "成功" : "失败") → \(url.absoluteString)")
     }
 
-    private static func contextData(messageID: String) -> Data {
-        (try? JSONEncoder().encode(["id": messageID])) ?? Data(messageID.utf8)
+    private static func contextData(message: StoredMessage) -> Data {
+        var context = ["id": message.id]
+        context["internetMessageID"] = message.internetMessageID
+        return (try? JSONEncoder().encode(context)) ?? Data(message.id.utf8)
     }
 
     private static func messageID(fromContext context: Data) -> String? {
