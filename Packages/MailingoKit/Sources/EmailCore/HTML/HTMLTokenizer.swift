@@ -26,6 +26,8 @@ struct HTMLTokenizer {
         /// 判断两个文本节点是不是"同一个段落里被行内标签切开的兄弟"。
         /// 这个信息同时也是将来喂给 LLM 做上下文分组的依据。
         let blockAncestor: BlockContext?
+        /// Explicit mail-client quote containers, not ordinary blockquotes.
+        let isReplyQuote: Bool
     }
 
     /// 一个块级容器的**身份**。
@@ -42,6 +44,7 @@ struct HTMLTokenizer {
     private struct OpenElement {
         let name: String
         let id: Int
+        let isReplyQuote: Bool
     }
 
     /// 自闭合 / 空元素：不入栈。
@@ -79,6 +82,7 @@ struct HTMLTokenizer {
         var runs: [TextRun] = []
         var stack: [OpenElement] = []
         var i = html.startIndex
+        var quotedTail = false
 
         while i < html.endIndex {
             try Task.checkCancellation()
@@ -104,7 +108,8 @@ struct HTMLTokenizer {
                     range: i..<j,
                     ancestorTags: stack.map(\.name),
                     blockAncestor: stack.last { blockLevelElements.contains($0.name) }
-                        .map { BlockContext(tag: $0.name, elementID: $0.id) }
+                        .map { BlockContext(tag: $0.name, elementID: $0.id) },
+                    isReplyQuote: quotedTail || stack.contains { $0.isReplyQuote }
                 ))
                 i = j
                 continue
@@ -137,7 +142,8 @@ struct HTMLTokenizer {
                     range: i..<html.endIndex,
                     ancestorTags: stack.map(\.name),
                     blockAncestor: stack.last { blockLevelElements.contains($0.name) }
-                        .map { BlockContext(tag: $0.name, elementID: $0.id) }
+                        .map { BlockContext(tag: $0.name, elementID: $0.id) },
+                    isReplyQuote: quotedTail || stack.contains { $0.isReplyQuote }
                 ))
                 break
             }
@@ -158,7 +164,12 @@ struct HTMLTokenizer {
 
                 if !isSelfClosing, !voidElements.contains(name), !name.isEmpty {
                     // 用 '<' 的偏移作为这个元素的唯一身份
-                    stack.append(OpenElement(name: name, id: html.distance(from: html.startIndex, to: i)))
+                    let attributes = ReplyQuotePolicy.attributes(in: String(inner))
+                    if ReplyQuotePolicy.startsQuotedTail(attributes) { quotedTail = true }
+                    stack.append(OpenElement(
+                        name: name, id: html.distance(from: html.startIndex, to: i),
+                        isReplyQuote: ReplyQuotePolicy.isQuoteContainer(name: name, attributes: attributes)
+                    ))
 
                     if skippedContentElements.contains(name) {
                         // 内容整体跳过，但要先把这一段"消化"掉，

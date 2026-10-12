@@ -46,7 +46,7 @@ enum SegmentExtractor {
     ]
 
     static func extract(from html: String) throws -> [TranslationSegment] {
-        let runs = try HTMLTokenizer.textRuns(in: html)
+        let runs = try ReplyQuotePolicy.currentMessageRuns(in: html)
         var segments: [TranslationSegment] = []
 
         for (index, run) in runs.enumerated() {

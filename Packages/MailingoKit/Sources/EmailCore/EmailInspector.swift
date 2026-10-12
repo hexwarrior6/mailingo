@@ -101,8 +101,14 @@ public enum EmailInspector {
             .replacingOccurrences(of: "\r\n", with: "\n")
             .components(separatedBy: "\n\n")
             .map { paragraph -> String in
-                let escaped = HTMLEntities.escapeText(paragraph)
-                return "<p>" + escaped.replacingOccurrences(of: "\n", with: "<br>") + "</p>"
+                let lines = paragraph.components(separatedBy: "\n").map { line in
+                    let escaped = HTMLEntities.escapeText(line)
+                    if line.trimmingCharacters(in: .whitespaces).hasPrefix(">") {
+                        return "<span class=\"gmail_quote\">" + escaped + "</span>"
+                    }
+                    return escaped
+                }
+                return "<p>" + lines.joined(separator: "<br>") + "</p>"
             }
             .joined(separator: "\n")
 

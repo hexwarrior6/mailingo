@@ -95,6 +95,7 @@ struct EmailWebView: NSViewRepresentable {
         /// loadHTMLString 会把页面顶回最上面，用户正读着内容会被拽走。
         /// 横向也要存 —— 宽表格/海报图的横向滚动位置一样会丢。
         private var pendingScroll: CGPoint?
+        private var expandedQuoteIDs: [String] = []
         /// 恢复的定时重申 —— didFinish 时布局往往还没定型（图片解码、远程图
         /// 重新加载），只恢复一次会被后续布局变化漂走；分几个时间点反复钉回。
         /// 用户一旦开始滚动（滚轮/触控板事件），立刻停止钉位——
@@ -166,16 +167,19 @@ struct EmailWebView: NSViewRepresentable {
             lastSourceHTML = currentHTML
 
             if sameEmail {
-                webView.evaluateJavaScript("[window.scrollX, window.scrollY]") { [weak self] result, _ in
+                webView.evaluateJavaScript("[window.scrollX, window.scrollY, " + ReplyQuoteCollapser.expandedStateScript + "]") { [weak self] result, _ in
                     var point = CGPoint.zero
-                    if let array = result as? [Double], array.count == 2 {
-                        point = CGPoint(x: array[0], y: array[1])
+                    if let array = result as? [Any], array.count == 3,
+                       let x = array[0] as? Double, let y = array[1] as? Double {
+                        point = CGPoint(x: x, y: y)
+                        self?.expandedQuoteIDs = array[2] as? [String] ?? []
                     }
                     DispatchQueue.main.async {
                         self?.loadRendered(rendered, scrollTo: point)
                     }
                 }
             } else {
+                expandedQuoteIDs = []
                 loadRendered(rendered, scrollTo: nil)
             }
         }
@@ -190,6 +194,16 @@ struct EmailWebView: NSViewRepresentable {
             )
             pendingScroll = point
             loadedRenderedHTML = rendered
+            // App-owned scripts run even with email JavaScript disabled. Install
+            // at document end so folding does not wait for remote images to load.
+            let controller = webView.configuration.userContentController
+            controller.removeAllUserScripts()
+            controller.addUserScript(WKUserScript(
+                source: ReplyQuoteCollapser.script(expandedIDs: expandedQuoteIDs),
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true,
+                in: .defaultClient
+            ))
             webView.loadHTMLString(rendered, baseURL: nil)
         }
 
@@ -309,9 +323,13 @@ struct EmailWebView: NSViewRepresentable {
         /// didFinish 后 WebKit 可能还有一拍布局 —— 下一轮主循环再校准一次。
         /// （滚动读写走 evaluateJavaScript —— 页面 JS 禁用时它依然可用，公开 API。）
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            applyScrollRestore()
-            scheduleScrollRestoration()
+            webView.evaluateJavaScript(ReplyQuoteCollapser.script(expandedIDs: expandedQuoteIDs)) { [weak self] _, error in
+                if let error { NSLog("[Mailingo] 引用折叠失败：%@", error.localizedDescription) }
+                self?.applyScrollRestore()
+                self?.scheduleScrollRestoration()
+            }
         }
+
 
         /// 布局随图片解码/远程图加载仍在变化 —— 分几个时间点反复钉回，
         /// 直到布局稳定**或用户开始滚动**（监听到第一个滚轮事件就收手，

@@ -11,9 +11,10 @@ LOG      := $(LOGDIR)/probe.log
 SPMDIR   := $(CURDIR)/.build/spm
 
 
-.PHONY: help bootstrap gen build test check-render run register status log stream diagnose clean reset-log install-app verify-appex refresh-plugins appicon appicon-project
+.PHONY: help bootstrap gen build test check-render check-reply-quotes run register status log stream diagnose clean reset-log install-app verify-appex refresh-plugins appicon appicon-project
 
 help:
+	@echo "make check-reply-quotes  验证引用折叠、展开和重载状态（真实 WebKit）"
 	@echo "make bootstrap  下载 XcodeGen 到 .tools/（无需 sudo，固定版本；克隆后先跑这个）"
 	@echo "make gen        生成 Mailingo.xcodeproj（XcodeGen）"
 	@echo "make build      编译（含 appex 嵌入）"
@@ -70,6 +71,13 @@ build: gen
 #
 # 渲染是唯一**没法用单元测试覆盖**的一环：它要跑真的 WKWebView、
 # 真的走一遍 WKURLSchemeHandler。没有这个目标时，改了渲染代码只能靠人眼看。
+check-reply-quotes:
+	@mkdir -p "$(CURDIR)/.build/swiftcache"
+	swiftc -module-cache-path "$(CURDIR)/.build/swiftcache" \
+	  App/ReplyQuoteCollapser.swift Scripts/check-reply-quotes.swift \
+	  -o "$(CURDIR)/.build/check-reply-quotes"
+	"$(CURDIR)/.build/check-reply-quotes" "$(CURDIR)/.build/reply-quotes-preview.png"
+
 check-render:
 	@mkdir -p "$(SPMDIR)/tmp" "$(CURDIR)/.build/swiftcache"
 	@TMPDIR="$(SPMDIR)/tmp" swift \

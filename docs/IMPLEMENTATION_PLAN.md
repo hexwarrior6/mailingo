@@ -2,6 +2,15 @@
 
 > 本文是实现 `docs/PRODUCT.md` 的技术方案。所有"已核实"结论均来自本机 SDK 头文件、Mail 的 sdef 以及真机实验，不是推测。
 
+## 当前邮件翻译范围（2026-10-12）
+
+- 在片段提取阶段排除客户端明确标记的引用历史：Apple Mail `blockquote[type=cite]`、Gmail/Yahoo/Proton 引用容器、Outlook `divRplyFwdMsg` / `appendonsend` 后的历史。
+- 纯文本支持 `>` 引用行、`On … wrote:` 和 Original Message 分隔符。普通无引用标记的 blockquote 保持可翻译；明确引用容器之外的穿插回复照常翻译。
+- 历史 HTML 留在原位，保留原文，不进入语言检测、Apple/LLM 翻译输入。缓存管线版本升至 3，防止旧片段 ID 对应错误。
+- 渲染期使用原生 `details` / `summary` 默认折叠历史，仅改变 WebKit 中的预览 DOM。原始 HTML、翻译缓存及保真检查不变。App 注入的可信脚本在文档加载后执行，邮件自带脚本仍禁用；原文与译文窗格均折叠，同一 HTML 增量重载保留展开状态。
+- `make check-reply-quotes` 用真实 WebKit 验证 7 类合成邮件的默认折叠、点击展开/收起、穿插回复可见、展开状态恢复和邮件脚本禁用。
+- 不明确的引用格式保守保留为待翻译正文；真实邮件格式需要通过脱敏样本继续补充。
+
 ---
 
 ## 0. 结论先行：3 个必须先纠正的事实
