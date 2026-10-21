@@ -1,411 +1,105 @@
-# Mailingo
+<div align="center"><a name="readme-top"></a>
 
-为 Apple Mail 提供「一键全文翻译」的原生 macOS 应用：打开一封外语邮件，点一下，
-右侧立即出现一份**中文版邮件镜像**——保留原有排版、表格、按钮和图片，
-而不是把文字丢出来重新排版。
+<img height="120" src="./docs/assets/icon.png" alt="Mailingo Icon">
 
-产品定位与完整需求见 **[docs/PRODUCT.md](docs/PRODUCT.md)**。
+<h1>Mailingo</h1>
 
----
+Native macOS email translation companion for Apple Mail — 1:1 layout mirrored translation right by your side.
 
-## 它是什么形态
+[![Platform](https://img.shields.io/badge/Platform-macOS%2015.0%2B-blue?logo=apple)](https://www.apple.com/macos/)
+[![Swift](https://img.shields.io/badge/Swift-6.0%2B-F05138?logo=swift)](https://swift.org)
+[![MailKit](https://img.shields.io/badge/Extension-MailKit-5856D6)](https://developer.apple.com/documentation/mailkit)
+[![WebKit](https://img.shields.io/badge/Renderer-WebKit-000000?logo=safari)](https://webkit.org)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-**轻量化，但不是"隐形"：Dock 图标和菜单栏都保留，只是关窗即退出。**
+English · [简体中文](README_zh-hans.md)
 
-- **窗口一关就退出**，不留后台进程、不占内存。下次要用再唤起。
-- Dock 图标、菜单栏、⌘, 设置、⌘⇧D 开发者模式 —— 全都照常。
-- 所以不用它的时候，它在你机器上是不存在的（连 Dock 占位都没有）。
-- 打开「跟随 Mail」之后，还可以让它**跟着 Mail 的阅读窗口一起关**
-  （设置 → 跟 Mail 联动，默认开）。
-
-代价是明确的：每次从 Mail 点横幅唤起都要**冷启动**一次（进程 + WebKit +
-翻译会话），比常驻要多等一点。换来的是"不占内存、不占 Dock"。
-
-> 试过用 `LSUIElement` 把 Dock 图标也藏掉，但那样**菜单栏会一起没**，
-> 设置和开发者模式都得另找地方放。既然"关窗即退出"本来就已经解决了内存问题，
-> 就没必要再牺牲菜单栏 —— 现在的做法反而是方案 §5.4 原本的建议。
+</div>
 
 ---
 
-## 当前状态
+## 💡 Introduction
 
-**M7（翻译缓存）已完成，同一封邮件只翻一次。** 核心链路（M3/M4/M5/M9）都已跑通，余下是 M8 打磨。
+**Mailingo** is a native macOS companion app that brings **one-click full email translation** to Apple Mail. 
 
-| 阶段 | 状态 |
-|---|---|
-| 需求基线（`docs/PRODUCT.md`） | ✅ |
-| 技术方案（`docs/IMPLEMENTATION_PLAN.md`） | ✅ 架构 C 已定 |
-| S0 探针：Mail 扩展能否作入口 + 数据源 | ✅ **四问全过**，见 [docs/S0-PROBE.md](docs/S0-PROBE.md) |
-| M3 EmailCore：MIME 解码 + HTML 字节切片管线 | ✅ 23 个单元测试 |
-| **M4 TranslationCore：Apple 翻译引擎** | ✅ **端到端跑通**（连续取 session 3/3、实际译文见自检日志） |
-| 会话（来回多封）的精确定位 | ✅ 每封按内容 ID 分开存；点横幅翻译的就是**你看的那一封** |
-| **M5 Renderer（内嵌图片 + 远程图阻断）** | ✅ 已完成 |
-| **跟随 Mail 自动切换（M2 复活）** | ✅ 已完成 |
-| **M7 翻译缓存** | ✅ **已完成**（含用户可调的清理策略） |
-| M6 吸附侧栏 | ⏸ 缓做（手动把两窗口并排已达到同等效果） |
-| M8 打磨（引导页/本地化/公证） | ⏸ 最后再说 |
+When you receive an email in a foreign language, clicking the translation banner in Apple Mail instantly pops up a side-by-side **mirrored version**. Instead of extracting raw text and discarding formatting, Mailingo **preserves the full original email layout** — including complex tables, styled buttons, colors, and embedded images.
 
-S0 的关键结论：Mail 扩展（Message Security 扩展点）能在**阅读窗格**挂横幅，
-并由 Mail 把**原始 MIME 直接交给扩展**——因此整条链路
-**不需要 Automation / Apple Events 权限**。
-
-架构：**扩展做入口与数据源 + 容器 App 做吸附式侧栏**。
-
-### 开发者模式
-
-菜单栏 **「显示 → 开发者模式」**（⌘⇧D）勾选切换，默认**关闭**。
-
-**不是两套界面** —— 只有一处布局代码，用条件分支决定多显示哪些面板：
-
-| | 正常使用（默认） | 开发者模式 |
-|---|---|---|
-| 选择邮件 / 重新翻译 | ✅ | ✅ |
-| 显示模式（原文/译文/双语） | ✅ | ✅ |
-| 翻译进度、错误提示 | ✅ | ✅ |
-| 切换翻译引擎（标记替换/原样返回） | — | ✅ |
-| 「翻译自检」按钮 | — | ✅ |
-| 「打开 .eml…」 | — | ✅ |
-| 保真指标 chip、MIME 结构、内容 ID | — | ✅ |
-| 「提取出的片段」表格 | — | ✅ |
-| 「S0 探针」页签 | — | ✅ |
-
-正常模式下引擎被强制为 Apple 翻译，不会翻出一堆 `〖0〗`。
-
-### App 现在能看到什么
-
-打开 Mailingo，**「邮件解析」页签**：
-
-- **内嵌图片（`cid:`）能正常显示**：邮件里的签名 logo、商品图在 HTML 里写的是
-  `src="cid:xxx"`，WebKit 不认这个协议、原样渲染会**完全看不见**。
-  渲染前会把它改写成自定义 scheme，由 `WKURLSchemeHandler` 从 MIME 里取字节喂回去。
-- **外部图片默认不加载**（和 Mail 一致）：远程图片是最常见的追踪手段，
-  发件人靠它知道你何时、看了几次。被拦截时预览区上方会明说
-  「这封邮件包含 N 张外部图片，已拦截」并给出一键载入 ——
-  **没有这句提示的话，用户只会以为图片坏了或 emoji 丢了**
-  （真实案例：有营销邮件把 emoji 做成远程图片，拦截后那几个 emoji 凭空消失，
-  而同封邮件里的文字 emoji 还在，看起来就是"有些 emoji 显示不出来"）。
-- **链接一律跳默认浏览器**，不会在这个小窗格里导航走。
-- 邮件里的脚本一律不执行（`allowsContentJavaScript = false`）——
-  有这一条就不需要再去 HTML 里剥 `<script>`，那是重复防线。
-- **跟随 Mail 自动切换**（可选，默认关）：打开后你在 Mail 里点开哪一封，
-  这里就自动切到那一封并翻译。需要「自动化」权限（首次打开会弹系统授权框）。
-- **显示模式**：`原文` / `译文` / `双语`（并排对照）三种，选择会记住。
-  只看译文在窄窗口（并排放在半屏时）里读数舒服得多。引擎可在三者间切换：
-  - **Apple 翻译** —— 系统内置，真译文
-  - **标记替换** —— 每个文本节点变成 `〖N〗`，用来看清哪些节点被碰过
-  - **原样返回** —— 右侧应与左侧**逐字节相同**，用于验证切片没有副作用
-- 顶部指标：`非文本字节一致` / `标签序列一致` / `改动 N 段` / `提取 N 段`
-- 翻译进行中显示 `翻译中 40/282` 这样的进度
-- **布局可调**：原文/译文之间的分隔线左右拖拽调宽度，预览区与片段列表之间的
-  分隔线上下拖拽调高度；底部折叠条点击即可隐藏片段列表，把空间让给预览
-  （折叠状态会记住）
-- **右上角可以选择邮件**：会话里来回好几封都会列在下拉里，
-  点 Mail 里某一封的「翻译」横幅时，这里会自动切到那一封
-
-左右一对比就能确认方案 §6 的核心要求：**表格、图片、颜色、条件注释原样都在，
-只有文字被换掉了。** 数据来自 Mail 真实收到的那封邮件（appex 写在沙盒容器里），
-也可以用「打开 .eml…」喂样本。
-
-**首次出中文需要下载语言包**：点工具栏的「**翻译自检**」，系统会弹下载确认。
-启动时的自动自检**故意不触发下载**，避免没经你同意就弹窗。
-自检报告写在 `~/Library/Logs/Mailingo/translation-selftest.log`，含语言对可用性、
-语言检测结果、连续取 session 的成功率、以及实际译文抽样。
-
-### 回复邮件的翻译范围
-
-只翻译当前邮件的新正文。可识别的历史引用（Apple Mail、Gmail、Outlook 等引用标记，以及纯文本 `>` / 回复分隔符）保留原文，不重复送去翻译；历史回复可以在 Mail 中单独打开对应邮件翻译。
-
-原文和译文预览都会**默认折叠历史引用**，点击「展开历史引用」查看原文，再点击「收起历史引用」收回。同一封邮件因图片翻译或远程内容开关重载时，保留已经展开的引用；切换到其他邮件时重新默认收起。引用区之外的穿插回复仍会翻译，普通正文引文也会保留翻译。未识别的引用格式可能仍会进入翻译。
-
-### 翻译缓存
-
-同一封邮件**只翻译一次**。第二次打开（包括 Mail 分批交付的"空壳版"和"完整版"）
-直接命中缓存，不再调翻译引擎。
-
-缓存的位置是 `~/Library/Caches/Mailingo/translations/`，一条缓存一个 JSON 文件。
-放 Caches 而不是 Application Support 是有意的 —— 这本就是随时可以重建的数据，
-磁盘紧张时让系统可以直接回收。
-
-「**Mailingo → 设置…**」（⌘,）里可以改清理规则：
-
-| 设置 | 含义 |
-|---|---|
-| 保留天数 | 多少天没用过就清掉。**0 = 不按时间清理**（默认 30） |
-| 大小上限 | 总占用超过多少 MB 就淘汰。**0 = 不限制大小**（默认 200） |
-| 立即清理 | 按上面的规则清一次 |
-| 清空全部缓存 | 全部删掉，下次重新翻 |
-
-两颗按钮之外还有一行「当前占用 N MB · N 条」。
-
-### 跟 Mail 联动
-
-设置里有两项跟 Mail 联动的开关。
-
-**「跟随 Mail 一起显示 / 隐藏」**（默认关）
-
-- Mail 被隐藏（右键 Dock 图标 → 隐藏，或 ⌘H）→ 我们也隐藏
-- Mail 重新显示 → 我们也显示，并把窗口提到最前
-
-**「Mail 被激活」要分两种情况判断**，因为**「你单击 Mail」和「Mail 到前台」
-是同一个事件**：
-
-| 当时的状态 | 你的意思 | 行为 |
-|---|---|---|
-| 我们压在 Mail 上面，上面没别的东西 | 想用 Mail | 不抢，让它上来 |
-| 我们被浏览器之类压在下面 | 想两个一起看 | 提上来 |
-
-区分靠 `CGWindowList` 的**前后顺序**：看我们上面有没有压着**别的 App**。
-关键是**把 Mail 排除在外** —— Mail 一被激活它的窗口必然排到我们前面，
-算进去的话两种情况就永远分不开。
-
-**只跟随「隐藏」，不跟随「切到别的 App」。** 这两件事在 macOS 里是各自独立的
-通知（`didHideApplication` vs `didDeactivateApplication`），语义差很远：
-后者在切到任何别的 App 时都会触发，用它会在你跳到浏览器查资料时把译文窗口
-收走。前者只在你主动隐藏 Mail 时触发，正是想跟随的那个动作。
-
-**提窗用 `orderFrontRegardless()`，不是 `NSApp.activate()`。** 后者会把活动
-App 从 Mail 抢走 —— Mail 一被激活就失去键盘焦点，你点进 Mail 打字却打到我
-们这边。那不是跟随，是把 Mail 踢下去。只提窗不抢焦点，Mail 照常能用，
-菜单栏也仍然属于 Mail。这是刻意的取舍。
-
-
-
-设置里还有一个开关：**「Mail 关掉阅读窗口时，同时关闭 Mailingo」**（默认开）。
-
-检测信号来自「跟随 Mail」的轮询 —— Mail 的 AppleScript 本来就区分
-「没有阅读窗口」和「没选中邮件」，前者正是我们要的。所以这个开关**依赖
-「跟随 Mail」**：没开跟随就没有信号，开关会置灰。
-
-两道防误伤，性质不同：
-
-- **必须曾经见过阅读窗口** —— 这是**正确性**，不是延迟。从 Finder 打开
-  Mailingo 翻看已捕获的邮件时，Mail 可能压根没开，那不是"窗口被关掉"，
-  不该把你的窗口收走。这道闸两种模式下都在。
-- **必须连续 3 次轮询（约 1.5 秒）都是这样** —— 这是**纯速度代价**，
-  用来防抖（Mail 在启动、切换、忙碌时都可能一瞬间报不出阅读窗口）。
-  打开下面的「立即关闭，不等确认」就降到 1 次。
-
-「立即关闭，不等确认」默认**关**。打开后识别到就关，剩下的延迟只有轮询
-间隔本身（最多 0.5 秒）—— 信号只能靠轮询拿到，没法更早了。
-
-**淘汰看的是"最近使用时间"而不是创建时间**：常用的邮件不会因为放得久就被删掉。
-清理时机是启动时一次 + 每次写入新缓存后一次，所以不打开设置也会自动维持。
-
-工具栏上的 ↻（**重新读取并重新翻译**）**会绕过缓存**，强制走一遍引擎。
-这一步是必需的 —— 有缓存之后，普通的"重新翻译"会直接命中缓存变成空操作，
-用户就再没有手段纠正一个翻坏的译文了。它重翻的是**你正在看的那一封**，
-不会被拽到最新捕获的那封上去。
-
-一个设计上的取舍：缓存里存的是 `[段 id: 译文]`，**不存 HTML**。因为 CID 内嵌图改写、
-远程图片阻断这些都是渲染期才做的事，一旦把改写结果缓存下来，下次就得反过来解析自己造的
-HTML。HTML 每次都从 `.eml` 重新渲染，缓存只负责省下"翻译"这一步。
+<div align="center">
+  <img src="./docs/assets/screenshot-main.png" alt="Mailingo Main Screenshot" width="100%">
+  <p><em>Apple Mail reading pane with native translation banner (left) alongside Mailingo 1:1 translation mirror (right).</em></p>
+</div>
 
 ---
 
-## 环境要求
+## ✨ Features
 
-- macOS 15.0+（开发机实测 15.7）
-- Xcode 26（Swift 6.2）
-- 一个可用于本地签名的 **Apple Development** 证书
-  （Mail 扩展必须由有效签名加载；且签名身份要保持稳定，否则系统会反复重新授权）
+| Feature | Capability | What It Solves |
+| :--- | :--- | :--- |
+| **📑 1:1 Layout Fidelity** | Byte-level HTML slice-and-replace pipeline | Preserves original responsive tables, inline styles, callout blocks, and CSS layout without breaking formatting. |
+| **📬 Native MailKit Extension** | macOS Message Security extension point | Injects a translation action banner into Apple Mail's reading pane. Delivers raw MIME with **zero Automation permissions**. |
+| **🖼️ CID Inline Images** | Custom WebKit scheme handler (`mailingo-cid://`) | Correctly resolves and renders `cid:` attachments, corporate logos, and embedded screenshots. |
+| **🛡️ Privacy & Tracker Blocking** | Blocks external images by default, disables JS | Prevents tracking pixels from leaking read receipts to senders; supports one-click manual loading. |
+| **💬 Smart Reply Quote Folding** | Identifies Apple Mail, Gmail, Outlook & `>` quotes | Automatically collapses historical email threads, avoiding redundant translation and focusing only on current text. |
+| **⚡ Zero Idle Footprint** | Quits completely when the window is closed | Leaves zero background daemons and consumes 0 MB of idle memory; auto-closes alongside Apple Mail reading windows. |
+| **💾 Local Translation Cache** | LRU disk cache with size & retention policies | Ensures each email is translated only once, speeding up repeated views with instant cache hits. |
 
-## 快速开始
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- macOS 15.0+ (Sequoia)
+- Xcode 16+ (Swift 6.0+)
+- An Apple Development signing certificate (required for loading Mail Extensions locally)
+
+### Build & Install
 
 ```bash
-make bootstrap     # 下载 XcodeGen 到 .tools/（无需 sudo，固定版本）
-make install-app   # 构建 + 校验 + 安装到 /Applications + 重新注册
+# 1. Download build tooling (XcodeGen)
+make bootstrap
+
+# 2. Build, sign, and install to /Applications
+make install-app
 ```
 
-然后：
+### Enable in Apple Mail
 
-1. **完全退出 Mail**（⌘Q，不是关窗口 —— Mail 只在启动时扫描扩展）
-2. 重新打开 Mail → **设置 → 扩展** → 勾选 **Mailingo**
-3. 打开几封普通的外语邮件，邮件顶部会出现探针横幅
-
-验证：
-
-```bash
-make status        # S0 四问判定摘要
-make diagnose      # 地面真相：os_log + appex 是否被拉起 + 注册情况
-```
-
-> `make diagnose` 和 `pluginkit` 需要在你自己的终端里跑。
-> 某些受限环境（CI、agent 沙盒）里 `log show` 会报 `Cannot run while sandboxed`。
+1. **Quit Apple Mail completely** (`⌘Q`, not just closing windows).
+2. Re-open Apple Mail → **Settings** (`⌘,`) → **Extensions** tab.
+3. Check the checkbox next to **Mailingo**.
+4. Open any email — you will see the Mailingo action banner at the top of the message pane.
 
 ---
 
-## 常用命令
+## 🛠️ Project Structure
 
-| 命令 | 作用 |
-|---|---|
-| `make bootstrap` | 下载 XcodeGen 到 `.tools/`（幂等） |
-| `make gen` | 由 `project.yml` 生成 `Mailingo.xcodeproj` |
-| `make build` | 编译（含 appex 嵌入与签名） |
-| `make test` | 跑单元测试（106 个，不需要证书、不到一秒） |
-| `make check-message-store` | 验证多版本邮件与旧翻译横幅的定位、淘汰清理（隔离测试目录） |
-| `make check-render` | 渲染冒烟检查：真的跑一遍 WKWebView，确认 `cid:` 内嵌图能显示 |
-| `make verify-appex` | 校验 appex 是可加载的真扩展，而不是空壳 |
-| `make install-app` | 构建 + 校验 + 装到 `/Applications` + 重新注册 |
-| `make status` | S0 探针四问判定摘要 |
-| `make diagnose` | os_log / appex 是否被拉起 / 注册情况 / 容器内容 |
-| `make log` / `make stream` | 跟随落盘日志 / 跟随 os_log |
-| `make refresh-plugins` | 重新注册扩展并列出 Mail 扩展 |
-| `make appicon ART=<画稿.png>` | 从画稿生成 App 图标（见下方「App 图标」） |
-| `make reset-log` | 清空探针日志与落盘的 MIME |
-| `make clean` | 清掉所有生成物 |
+```text
+mailingo/
+├── App/                   # macOS Companion App (SwiftUI & WebKit inspection view)
+├── MailExtension/         # Apple Mail Extension (MailKit security extension point)
+├── Shared/                # Shared utilities and App Group container storage
+├── Packages/
+│   └── MailingoKit/       # Core libraries (EmailCore parser, TranslationCore, Cache)
+├── Design/                # Raw vector art and design assets
+├── Scripts/               # Build, appicon, verification, and diagnostics scripts
+└── docs/                  # Detailed specifications and architecture plans
+    ├── PRODUCT.md         # Product requirements baseline
+    ├── IMPLEMENTATION_PLAN.md # Technical architecture and risk mitigations
+    └── S0-PROBE.md        # MailKit extension feasibility probe report
+```
 
 ---
 
-## 仓库结构
+## 📖 Deep Dive & Documentation
 
-```
-.
-├── project.yml            # XcodeGen 工程定义（唯一事实来源，.xcodeproj 不入库）
-├── Makefile               # 构建 / 安装 / 排查入口
-├── App/                   # 容器 App（现在是看板；将来承载吸附式侧栏）
-│   └── Resources/         # Assets.xcassets —— App 图标，由 make appicon 生成
-├── MailExtension/         # Mail 扩展（appex）
-├── Shared/                # App 与 appex 共用代码
-├── Packages/MailingoKit/  # 核心逻辑：EmailCore（只依赖 Foundation）+ TranslationCore + Cache
-├── Design/                # 视觉素材的**源文件**（画稿，不参与编译）
-├── Scripts/               # 校验与判定脚本
-└── docs/
-    ├── PRODUCT.md              # 产品需求（需求基线）
-    ├── IMPLEMENTATION_PLAN.md  # 技术方案、架构取舍、里程碑、风险
-    └── S0-PROBE.md             # S0 探针运行手册与实测结论
-```
-
-`.xcodeproj`、`Support/`（Info.plist）、`.build/`、`.tools/` 都是生成物或本地工具，
-不进版本控制。**克隆后先跑 `make bootstrap`。**
+For developers interested in the internal architecture and technical tradeoffs:
+- **[Product Requirements Baseline](docs/PRODUCT.md)** — Core user flows, sidebar specs, and design goals.
+- **[Implementation Plan & Architecture](docs/IMPLEMENTATION_PLAN.md)** — HTML byte-slicing pipeline, WebKit scheme handling, and caching.
+- **[S0 Probe Field Report](docs/S0-PROBE.md)** — Feasibility findings on MailKit extension hooks and MIME access.
 
 ---
 
-## App 图标
+## 📄 License
 
-改图标只需要一张**满幅方形的画稿**（1024 或更大，别自己画圆角）：
-
-```sh
-make appicon-project      # 用仓库里的画稿重新生成（等价于下面这条）
-make appicon ART=Design/AppIcon.png CROP=80
-make gen && make build
-```
-
-`Design/AppIcon.png` 是当前蓝色渐变翻译信封画稿的原始源文件。
-主应用和 Mail 扩展的 `Assets.xcassets/AppIcon.appiconset/` 里的 PNG 是
-**生成物**，别手工编辑——跑 `make appicon` 会整个覆盖。
-
-**为什么要 `CROP=80`。** 新画稿为 1254×1254，外围蓝色背景留白较多。
-生成时居中保留 80%（1003×1003），只裁外围背景，保留完整信封与翻译符号，
-再套现有 macOS 圆角蒙版与投影。原始画稿保持完整，小尺寸图标的主体更清楚。
-`CROP` 默认 100（不裁剪），当前画稿不再需要额外缩小。
-
-`SHRINK` 会把画稿缩到画布中央，四周用**镜像反射**补齐背景（不是把最外圈像素
-往外拉——那样对中心发光的画稿会围出一道亮环）。主体本来就留白充足的画稿不需要
-这个参数，省略即 100。
-
-**为什么要脚本，不能直接丢进 Assets.xcassets：**
-
-macOS 和 iOS 不一样，**不会替 App 裁圆角**，圆角与留白必须在图片里。而
-Apple 用的圆角又**不是圆角矩形**，是连续曲率的 squircle——实测（用系统自带的
-备忘录/提醒事项/照片，三者像素级一致）：形状占 824×824 居中，但顶边往下 40px
-处真实形状宽 679，而半径 185 的圆角矩形在那个深度只有 469。硬套圆角矩形会明显偏尖。
-所以脚本**直接从系统图标里把官方形状抠出来当蒙版**。
-
-顺带实测出来的两件事，也一并写在脚本里了：
-
-- **形状和投影要分家**。系统图标的 alpha 是"形状叠投影"的合成结果，直接拿来当
-  蒙版会给新图标套上一圈投影。脚本按阈值 128 分开（投影紧贴边缘最高只有 alpha
-  73，低于 128 会被整体滤掉），再补一次极轻的模糊还原平滑边缘。
-- **Apple 确实烘焙了投影**。实心底边之下还有约 44px 的投影。脚本的投影参数是
-  逐点对着系统图标的 alpha 轮廓量出来的（+8px→50 对系统 53，+16→30 对 34，
-  +24→13 对 16）。
-
-跑完会在 `.build/appicon-preview.png` 生成一张对照图（16/32/64/128/256 ×
-浅底/深底）——小尺寸下糊不糊，不装到系统里也看得出来。
-
----
-
-## 已知的翻译局限（V1）
-
-**被行内标签切开的孤立虚词翻不准**，例如：
-
-```html
-<p>Meeting from <b>9:00</b> to <b>11:00</b></p>   <!-- 中间的 to 没有语境 -->
-<p>Due on 14<sup>th</sup> March</p>                 <!-- th 只是序数后缀 -->
-```
-
-Apple 翻译的接口**只接受"要翻的这段文本"**，看不到上下文，这类片段翻出来往往是错的。
-
-**当前策略**：这类片段**整段保留原文**，不翻 —— 翻错比不翻更糟。
-判据是「虚词清单 + 该文本节点与同块级容器内的相邻节点并存」；
-独占一个块的短词（如 `<button>No</button>`）有完整语境，照常翻译。
-
-**根治办法是 LLM 引擎**：把整封邮件的文本作为**输入上下文**一起给它，
-但只要求它返回译文数组（**不要让模型重写 HTML** —— 那会毁掉排版，
-而且输出 token 贵得多）。代码里已经预留好位置：
-`TranslationEngine.hasFullContext` 为 `true` 的引擎会收到全部片段，包括孤立虚词。
-
-## 开发时容易踩的坑
-
-这些都在 `docs/S0-PROBE.md` 的「已知的环境注意点」里详述，`make verify-appex`
-会一次性兜住前两条：
-
-1. **appex 必须沙盒化**（`ENABLE_APP_SANDBOX: YES`）——macOS 硬性要求，
-   否则 `pkd` 不注册它：`pluginkit` 查不到、Mail 扩展面板为空。
-   但**容器 App 必须非沙盒**（它以后要用 Accessibility）。沙盒按 target 分开决定。
-2. **必须关闭 `ENABLE_DEBUG_DYLIB`**——开启时 appex 主可执行文件只剩 stub，
-   而 App 扩展没有 `main()` 入口，宿主按 `NSExtensionPrincipalClass` 查类时
-   类根本没注册。症状与第 1 条几乎一样：注册成功、签名 OK、App 能开，但 Mail 看不到。
-3. **构建需要 `-disable-sandbox`**——Swift 宏会让编译器用 `sandbox-exec` 启动
-   plugin-server，在已是沙盒的构建环境里嵌套会失败。
-
-这三条的症状都是「扩展明明装上了，Mail 里就是没有」，排查时先看第 1、2 条。
-
-**第 4 条（翻译相关，症状最误导）**：`TranslationSession.Configuration` 必须
-**复用同一个实例反复 `invalidate()`**，不能每次新建。它的相等性包含 `version`，
-而 `invalidate()` 只在当前值上加一 —— 每次新建再 invalidate，每个配置的 version
-都是 1、彼此相等，SwiftUI 就认为"配置没变"，**不再触发 `.translationTask`**。
-
-表现是：**第一次翻译完全正常，之后每次都卡在「翻译中 0/N」，直到 30 秒超时报
-「等待翻译会话超时」**。看起来像翻译服务变慢，其实是根本没去要 session。
-`make test` 里有两条测试把这件事钉住了。
-
-**第 6 条（开发期特有）**：**同时存在两份 App 时，`mailingo://` 会路由到不确定的那一份。**
-构建目录和 `/Applications` 各有一份、两份都声明了同一个 URL scheme 时，
-`open mailingo://…` 可能拉起"另一份"，看起来像"每点一次就多开一个实例"。
-开发时要么只留一份（`make install-app` 之后把构建目录那份从 LaunchServices 注销），
-要么用 `open -a <具体路径>` 明确指定。
-
-**第 8 条（被动信号的噪声）**：**Mail 会推送邮件内容，但不推送"用户在看哪一封"。**
-`decodedMessage` 回调里有大量批量解码 —— 实测 59 个相邻间隔有 38 个小于 1.5 秒
-（滚动列表、预取、打开会话时的批量解码）。所以"切到最新解码的那封"会乱跳。
-要知道"当前选中项"只能主动查询（`MailSelectionMonitor` 用 AppleScript 查
-`selected messages`），代价是一次「自动化」授权。
-
-**第 7 条（Mail 的交付方式，影响很大）**：**同一封邮件 Mail 会回调两次。**
-先给"信封到了、附件还没下载"的版本（内嵌图片部分是**空的**），稍后再给完整版。
-实测同一封 Message-ID 两次的字节数能差 **725 倍**（24KB vs 18MB）。
-不去重的话：下拉列表里同一封会出现两次；更糟的是可能挑中空壳那份，
-于是**内嵌图片全是空白**。`MessageStore.all()` 现在按 `Message-ID` 归组、
-保留字节数最多的那份，App 也会在完整版到达时自动换上。
-
-**第 5 条（会话相关）**：**不要把每封邮件写进同一个文件。**
-Mail 会把会话里每一封都解码一遍（实测 200 次调用出现十几个不同大小），
-谁最后被解码谁覆盖前面 —— 容器 App 拿到的就跟你正在看的那封毫无关系，
-表现为「只能识别到第一封」「双击单独打开那封才识别得到」。
-现在每封按内容 ID 存 `messages/<id>.eml`，并靠 banner 的 `context`
-把「用户点的是哪一封」精确传出来。
-
----
-
-## 权限原则
-
-只申请真正需要的权限：
-
-- ✅ Mail 扩展：**零额外权限**（原始 MIME 由 Mail 主动递给扩展）
-- ✅ 跟随 Mail 窗口：**零权限**（`CGWindowListCopyWindowInfo` 读 bounds）
-- ⬜ 读取当前邮件（备用路径 ⌥T）：Automation / Apple Events
-- ⬜ 让 Mail 让出空间（V1.1 可选）：Accessibility
-
-**不使用 Full Disk Access，不直接读取 `~/Library/Mail/`。**
-详见 [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) §5。
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
