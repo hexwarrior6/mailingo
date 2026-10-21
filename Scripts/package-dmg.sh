@@ -32,20 +32,19 @@ echo "📦 正在准备打包分发产物..."
 echo "  源应用: $APP_PATH"
 echo "  输出目录: $OUTPUT_DIR"
 
-# 1. 验证 appex 完整性
+# 1. 验证并保留 entitlements 进行签名补全
+APPEX_PATH="$APP_PATH/Contents/PlugIns/MailingoMailExtension.appex"
+echo "🔏 检查代码签名（保留 entitlements）..."
+if [ -d "$APPEX_PATH" ]; then
+  codesign --force --preserve-metadata=entitlements,requirements,flags --sign - "$APPEX_PATH" 2>/dev/null || true
+fi
+codesign --force --preserve-metadata=entitlements,requirements,flags --sign - "$APP_PATH" 2>/dev/null || true
+
+# 2. 验证 appex 完整性
 if [ -x "$SCRIPT_DIR/verify-appex.sh" ]; then
   echo "🔍 校验 appex 结构..."
   bash "$SCRIPT_DIR/verify-appex.sh" "$APP_PATH"
 fi
-
-# 2. 检查并确保 Ad-hoc 签名
-APPEX_PATH="$APP_PATH/Contents/PlugIns/MailingoMailExtension.appex"
-echo "🔏 检查并补全代码签名（Ad-hoc 签名）..."
-# 按照从内向外的顺序签名
-if [ -d "$APPEX_PATH" ]; then
-  codesign --force --sign - "$APPEX_PATH" 2>/dev/null || true
-fi
-codesign --force --deep --sign - "$APP_PATH" 2>/dev/null || true
 
 # 3. 准备输出目录与暂存区
 mkdir -p "$OUTPUT_DIR"
@@ -60,15 +59,18 @@ ln -s /Applications "$STAGING_DIR/Applications"
 
 # 4. 生成 DMG
 DMG_PATH="$OUTPUT_DIR/Mailingo.dmg"
+TEMP_DMG="$(mktemp -t mailingo-out-XXXXXX).dmg"
 echo "💿 制作 DMG 镜像 ($DMG_PATH)..."
-rm -f "$DMG_PATH"
+rm -f "$DMG_PATH" "$TEMP_DMG"
 hdiutil create \
   -volname "Mailingo" \
   -srcfolder "$STAGING_DIR" \
   -ov \
   -format UDZO \
   -imagekey zlib-level=9 \
-  "$DMG_PATH"
+  "$TEMP_DMG"
+
+mv -f "$TEMP_DMG" "$DMG_PATH"
 
 # 5. 生成 ZIP（作为备选下载）
 ZIP_PATH="$OUTPUT_DIR/Mailingo.zip"
