@@ -20,6 +20,8 @@ DerivedData/
 # 结果是测试引用的文件根本没进仓库，克隆下来直接挂。踩过一次。
 
 # Xcode / macOS
+Design/templates/
+Scripts/generate-dmg-templates.swift
 xcuserdata/
 *.xcworkspace/xcuserdata/
 .DS_Store

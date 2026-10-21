@@ -10,9 +10,10 @@ Native macOS email translation companion for Apple Mail — 1:1 layout mirrored 
 [![Swift](https://img.shields.io/badge/Swift-6.0%2B-F05138?logo=swift)](https://swift.org)
 [![MailKit](https://img.shields.io/badge/Extension-MailKit-5856D6)](https://developer.apple.com/documentation/mailkit)
 [![WebKit](https://img.shields.io/badge/Renderer-WebKit-000000?logo=safari)](https://webkit.org)
+[![Website](https://img.shields.io/badge/Website-Live-brightgreen)](https://hexwarrior6.github.io/mailingo/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-English · [简体中文](README_zh-hans.md)
+[Official Website](https://hexwarrior6.github.io/mailingo/) · English · [简体中文](README_zh-hans.md)
 
 </div>
 

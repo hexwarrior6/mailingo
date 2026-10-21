@@ -10,9 +10,10 @@
 [![Swift](https://img.shields.io/badge/Swift-6.0%2B-F05138?logo=swift)](https://swift.org)
 [![MailKit](https://img.shields.io/badge/扩展-MailKit-5856D6)](https://developer.apple.com/documentation/mailkit)
 [![WebKit](https://img.shields.io/badge/渲染-WebKit-000000?logo=safari)](https://webkit.org)
+[![Website](https://img.shields.io/badge/官网-访问-brightgreen)](https://hexwarrior6.github.io/mailingo/)
 [![License](https://img.shields.io/badge/开源协议-MIT-green.svg)](LICENSE)
 
-[English](README.md) · 简体中文
+[官方网站](https://hexwarrior6.github.io/mailingo/) · [English](README.md) · 简体中文
 
 </div>
 
