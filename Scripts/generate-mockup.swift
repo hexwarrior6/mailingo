@@ -10,7 +10,7 @@ guard let screenshotImage = NSImage(contentsOfFile: screenshotPath) else {
     exit(1)
 }
 
-// 目标画布尺寸 (PommePlate 官方标准 16-inch MacBook Pro 规格)
+// 目标画布尺寸 (PommePlate / Modern MacBook Pro 16 规格)
 let totalW: CGFloat = 3910
 let totalH: CGFloat = 2236
 
@@ -33,93 +33,135 @@ NSGraphicsContext.current = context
 let cg = context.cgContext
 
 // 1. 底部机身投影 (Ambient drop shadow)
-let shadowPath = NSBezierPath(ovalIn: CGRect(x: 200, y: 20, width: totalW - 400, height: 120))
-NSColor(white: 0.0, alpha: 0.18).setFill()
+let shadowPath = NSBezierPath(ovalIn: CGRect(x: 240, y: 15, width: totalW - 480, height: 110))
+NSColor(white: 0.0, alpha: 0.20).setFill()
 shadowPath.fill()
 
-// 2. 绘制屏幕上盖外壳 (Lid / Display Assembly)
-// 原点在左下角 (Cocoa 坐标系)
-// 在 SVG 坐标系里 (从上往下)：Top=0, Height=2236
-// 上盖位于 X: 365, W: 3181. 屏幕区域在 SVG: X=419, Y=95, W=3072, H=1920
-let lidX: CGFloat = 365
-let lidW: CGFloat = 3181
-let lidH: CGFloat = 2072
-let lidY: CGFloat = totalH - lidH - 60 // 离顶部约 60px
+// 2. 现代全面屏规格 (Ultra-thin bezel 全面屏)
+let lidW: CGFloat = 3180
+let lidX: CGFloat = (totalW - lidW) / 2 // 365
+
+// 极窄等宽边框 (Top: 20px, Left: 20px, Right: 20px, Chin: 26px)
+let bezelSize: CGFloat = 20
+let chinSize: CGFloat = 26
+
+let screenW: CGFloat = lidW - (bezelSize * 2) // 3140
+let srcSize = screenshotImage.size
+let scale = screenW / srcSize.width // 3140 / 2940 = 1.068027
+let screenH: CGFloat = round(srcSize.height * scale) // 2042
+
+let lidH: CGFloat = screenH + bezelSize + chinSize // 2088
+let lidY: CGFloat = 80 // 距离底部底座的位置
 
 // 上盖外框 (深空灰铝合金)
 let lidOuterRect = CGRect(x: lidX, y: lidY, width: lidW, height: lidH)
-let lidOuterPath = NSBezierPath(roundedRect: lidOuterRect, xRadius: 46, yRadius: 46)
+let lidOuterPath = NSBezierPath(roundedRect: lidOuterRect, xRadius: 36, yRadius: 36)
 NSColor(red: 0.58, green: 0.59, blue: 0.61, alpha: 1.0).setFill() // 外壳铝合金银灰
 lidOuterPath.fill()
 
-// 内侧中框
-let lidMidRect = lidOuterRect.insetBy(dx: 10, dy: 10)
-let lidMidPath = NSBezierPath(roundedRect: lidMidRect, xRadius: 40, yRadius: 40)
-NSColor(red: 0.18, green: 0.19, blue: 0.20, alpha: 1.0).setFill()
-lidMidPath.fill()
-
-// 屏幕黑色边框 (Bezel)
-let bezelRect = lidOuterRect.insetBy(dx: 22, dy: 22)
+// 屏幕外圈纯黑窄边框 (全面屏薄中框)
+let bezelRect = lidOuterRect.insetBy(dx: 6, dy: 6)
 let bezelPath = NSBezierPath(roundedRect: bezelRect, xRadius: 32, yRadius: 32)
-NSColor(red: 0.08, green: 0.08, blue: 0.09, alpha: 1.0).setFill()
+NSColor(red: 0.07, green: 0.07, blue: 0.08, alpha: 1.0).setFill()
 bezelPath.fill()
 
 // 3. 屏幕显示区域 (Active Display Area)
-let screenW: CGFloat = 3072
-let screenH: CGFloat = 1920
-let screenX: CGFloat = lidX + (lidW - screenW) / 2
-let screenY: CGFloat = lidY + 80
-
+let screenX: CGFloat = lidX + bezelSize // 385
+let screenY: CGFloat = lidY + chinSize  // 106
 let screenRect = CGRect(x: screenX, y: screenY, width: screenW, height: screenH)
-let screenClipPath = NSBezierPath(roundedRect: screenRect, xRadius: 10, yRadius: 10)
+
+// 现代 MacBook 屏幕顶部弧度 (Liquid Retina XDR 圆角)
+let screenClipPath = NSBezierPath()
+let screenRadius: CGFloat = 16
+let left = screenRect.minX
+let right = screenRect.maxX
+let bottom = screenRect.minY
+let top = screenRect.maxY
+
+screenClipPath.move(to: CGPoint(x: left, y: bottom + 4))
+screenClipPath.line(to: CGPoint(x: left, y: top - screenRadius))
+screenClipPath.appendArc(from: CGPoint(x: left, y: top),
+                         to: CGPoint(x: left + screenRadius, y: top),
+                         radius: screenRadius)
+screenClipPath.line(to: CGPoint(x: right - screenRadius, y: top))
+screenClipPath.appendArc(from: CGPoint(x: right, y: top),
+                         to: CGPoint(x: right, y: top - screenRadius),
+                         radius: screenRadius)
+screenClipPath.line(to: CGPoint(x: right, y: bottom + 4))
+screenClipPath.line(to: CGPoint(x: left, y: bottom + 4))
+screenClipPath.close()
 
 cg.saveGState()
 screenClipPath.addClip()
 
-// 黑色背景底色
+// 黑色底色
 NSColor.black.setFill()
 screenRect.fill()
 
-// 绘制截图内容 (顶部完全对齐，严禁裁切顶上内容，多余高度在底部自然裁切)
-let srcSize = screenshotImage.size
-let scaleX = screenW / srcSize.width
-let scaleY = screenH / srcSize.height
-let fillScale = max(scaleX, scaleY)
-let drawW = srcSize.width * fillScale
-let drawH = srcSize.height * fillScale
-let drawX = screenX + (screenW - drawW) / 2
-// 在 Cocoa 坐标系中 (原点在左下角)：
-// 屏幕顶部为 screenY + screenH
-// 图像绘制区域的顶部为 drawY + drawH
-// 要保证顶部完全对齐、绝不裁切顶上内容：drawY + drawH = screenY + screenH => drawY = screenY + screenH - drawH
-let drawY = screenY + screenH - drawH
+// 绘制截图内容 (顶部完全对齐，严禁裁切顶上内容)
+let drawW = screenW
+let drawH = screenH
+let drawX = screenX
+let drawY = screenY // drawY + drawH == screenY + screenH (精确贴合)
 
-screenshotImage.draw(in: CGRect(x: drawX, y: drawY, width: drawW, height: drawH), from: .zero, operation: .sourceOver, fraction: 1.0)
+screenshotImage.draw(in: CGRect(x: drawX, y: drawY, width: drawW, height: drawH),
+                     from: .zero,
+                     operation: .sourceOver,
+                     fraction: 1.0)
 
-// 屏幕轻微玻璃内阴影 (提升立体真实感)
-let innerShadow = NSBezierPath(rect: screenRect)
-NSColor(white: 0.0, alpha: 0.06).setStroke()
-innerShadow.lineWidth = 2.0
-innerShadow.stroke()
+// 4. 现代 MacBook 经典标志：居中刘海 (Camera Notch)
+let notchW: CGFloat = 216
+let notchH: CGFloat = 78 // 与菜单栏高度精确契合
+let notchRadius: CGFloat = 12
+let notchX = screenX + (screenW - notchW) / 2
+let notchTop = top
+let notchBottom = top - notchH
+
+let notchPath = NSBezierPath()
+notchPath.move(to: CGPoint(x: notchX, y: notchTop))
+notchPath.line(to: CGPoint(x: notchX, y: notchBottom + notchRadius))
+notchPath.appendArc(from: CGPoint(x: notchX, y: notchBottom),
+                    to: CGPoint(x: notchX + notchRadius, y: notchBottom),
+                    radius: notchRadius)
+notchPath.line(to: CGPoint(x: notchX + notchW - notchRadius, y: notchBottom))
+notchPath.appendArc(from: CGPoint(x: notchX + notchW, y: notchBottom),
+                    to: CGPoint(x: notchX + notchW, y: notchBottom + notchRadius),
+                    radius: notchRadius)
+notchPath.line(to: CGPoint(x: notchX + notchW, y: notchTop))
+notchPath.close()
+
+NSColor(red: 0.05, green: 0.05, blue: 0.06, alpha: 1.0).setFill()
+notchPath.fill()
+
+// 5. 刘海内部摄像头与指示灯 (FaceTime HD Camera in Notch)
+let cameraCenterY = notchTop - (notchH / 2) + 2
+let cameraCenterX = totalW / 2
+
+// 镜头外圈
+let cameraOuter = NSBezierPath(ovalIn: CGRect(x: cameraCenterX - 7, y: cameraCenterY - 7, width: 14, height: 14))
+NSColor(red: 0.10, green: 0.11, blue: 0.14, alpha: 1.0).setFill()
+cameraOuter.fill()
+
+// 镜头高光反光 (深蓝紫镀膜)
+let lensInner = NSBezierPath(ovalIn: CGRect(x: cameraCenterX - 3, y: cameraCenterY - 3, width: 6, height: 6))
+NSColor(red: 0.18, green: 0.28, blue: 0.45, alpha: 0.85).setFill()
+lensInner.fill()
+
+// 微弱环境光传感器孔
+let sensorHole = NSBezierPath(ovalIn: CGRect(x: cameraCenterX + 28, y: cameraCenterY - 2, width: 4, height: 4))
+NSColor(red: 0.08, green: 0.09, blue: 0.10, alpha: 0.9).setFill()
+sensorHole.fill()
+
+// 屏幕边缘轻微内边框高光
+let screenEdgeHighlight = NSBezierPath(rect: screenRect)
+NSColor(white: 1.0, alpha: 0.04).setStroke()
+screenEdgeHighlight.lineWidth = 1.0
+screenEdgeHighlight.stroke()
 
 cg.restoreGState()
 
-// 4. 摄像头区域 (FaceTime HD Camera)
-let cameraY = lidY + lidH - 42
-let cameraRect = CGRect(x: totalW / 2 - 8, y: cameraY - 8, width: 16, height: 16)
-let cameraPath = NSBezierPath(ovalIn: cameraRect)
-NSColor(red: 0.12, green: 0.14, blue: 0.18, alpha: 1.0).setFill()
-cameraPath.fill()
-// 镜头微弱反光
-let lensPath = NSBezierPath(ovalIn: CGRect(x: totalW / 2 - 3, y: cameraY - 3, width: 6, height: 6))
-NSColor(red: 0.15, green: 0.25, blue: 0.40, alpha: 0.8).setFill()
-lensPath.fill()
-
-// 5. 下方机身底座 (Base / Chin)
+// 6. 下方机身底座 (Base / Chin)
 let baseY: CGFloat = lidY - 44
-let baseRect = CGRect(x: 0, y: baseY, width: totalW, height: 88)
-
-// 底座梯形与铝合金渐变
 let basePath = NSBezierPath()
 basePath.move(to: CGPoint(x: 240, y: baseY))
 basePath.line(to: CGPoint(x: totalW - 240, y: baseY))
@@ -151,16 +193,16 @@ highlightPath.lineWidth = 1.5
 highlightPath.stroke()
 
 // 开盖凹槽 (Opening Notch / Thumb groove)
-let notchW: CGFloat = 380
-let notchH: CGFloat = 24
-let notchRect = CGRect(x: (totalW - notchW) / 2, y: baseY + 88 - notchH, width: notchW, height: notchH)
-let notchPath = NSBezierPath(roundedRect: notchRect, xRadius: 10, yRadius: 10)
+let thumbNotchW: CGFloat = 380
+let thumbNotchH: CGFloat = 24
+let thumbNotchRect = CGRect(x: (totalW - thumbNotchW) / 2, y: baseY + 88 - thumbNotchH, width: thumbNotchW, height: thumbNotchH)
+let thumbNotchPath = NSBezierPath(roundedRect: thumbNotchRect, xRadius: 10, yRadius: 10)
 NSColor(red: 0.38, green: 0.39, blue: 0.41, alpha: 1.0).setFill()
-notchPath.fill()
+thumbNotchPath.fill()
 
 NSGraphicsContext.restoreGraphicsState()
 
-// 裁剪周围多余透明区域 (保留适当呼吸留白)
+// 裁剪周围多余透明区域 (保留自然呼吸留白)
 let cropRect = CGRect(x: 160, y: 10, width: totalW - 320, height: totalH - 10)
 let croppedRep = NSBitmapImageRep(
     bitmapDataPlanes: nil,
@@ -189,5 +231,6 @@ let outputURL = URL(fileURLWithPath: "docs/assets/screenshot-main.png")
 let finalData = croppedRep.representation(using: .png, properties: [:])!
 try! finalData.write(to: outputURL)
 
-print("✅ 成功生成 MacBook 带壳渲染图：\(outputURL.path)")
-print("   新尺寸：\(croppedRep.pixelsWide) × \(croppedRep.pixelsHigh)")
+print("✅ 成功生成现代全面屏 MacBook 带壳渲染图：\(outputURL.path)")
+print("   尺寸：\(croppedRep.pixelsWide) × \(croppedRep.pixelsHigh)")
+print("   顶部窄边框：\(bezelSize)px, 刘海尺寸：\(notchW)×\(notchH)px")
