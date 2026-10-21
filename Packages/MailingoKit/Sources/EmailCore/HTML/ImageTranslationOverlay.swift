@@ -211,7 +211,7 @@ public enum ImageTranslationOverlay {
             // 角标是锚点的**兄弟**（不是嵌进锚点里），装饰层包住两者。
             // 纯图超链接加 line-height:0 消除基线缝隙；若超链接内带有文字，保留正常行高避免文字挤压。
             let style = hasVisibleText(in: anchorWithImg, excluding: imgTag)
-                ? "position:relative!important;display:inline-block!important;"
+                ? "position:relative!important;display:inline-block!important;max-width:100%!important;box-sizing:border-box!important;"
                 : wrapperStyle
             return #"<span style="\#(style)">\#(inner)\#(button)</span>"#
         }
@@ -265,7 +265,7 @@ public enum ImageTranslationOverlay {
     /// 装饰层样式。`!important` 是必须的 —— 邮件自带的 CSS 会覆盖
     /// 注入元素的普通内联样式（reset 样式很常见）。
     private static let wrapperStyle =
-        "position:relative!important;display:inline-block!important;line-height:0!important;"
+        "position:relative!important;display:inline-block!important;line-height:0!important;max-width:100%!important;box-sizing:border-box!important;"
 
     private static func badgeAnchor(key: String, badge: Badge) -> String {
         // 正圆（24×24、border-radius 50%）：文字紧凑、去内边距与字距

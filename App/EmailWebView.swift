@@ -154,9 +154,11 @@ struct EmailWebView: NSViewRepresentable {
             // 宁可多等一个异步回合，也不能先放请求出去。
             if appliedRemotePolicy == false, !isBlockingInPlace { return }
 
-            let rendered = ImageTranslationOverlay.inject(
-                into: CIDReferenceRewriter.rewrite(currentHTML),
-                badges: presentation?.badges ?? [:]
+            let rendered = EmailResponsiveLayout.inject(
+                into: ImageTranslationOverlay.inject(
+                    into: CIDReferenceRewriter.rewrite(currentHTML),
+                    badges: presentation?.badges ?? [:]
+                )
             )
             guard loadedRenderedHTML != rendered else { return }
 
@@ -188,9 +190,11 @@ struct EmailWebView: NSViewRepresentable {
         /// 等待读滚动位置期间状态可能又变了，永远加载最新的一版。
         private func loadRendered(_ rendered: String, scrollTo point: CGPoint?) {
             guard let webView else { return }
-            let rendered = ImageTranslationOverlay.inject(
-                into: CIDReferenceRewriter.rewrite(currentHTML),
-                badges: presentation?.badges ?? [:]
+            let rendered = EmailResponsiveLayout.inject(
+                into: ImageTranslationOverlay.inject(
+                    into: CIDReferenceRewriter.rewrite(currentHTML),
+                    badges: presentation?.badges ?? [:]
+                )
             )
             pendingScroll = point
             loadedRenderedHTML = rendered
