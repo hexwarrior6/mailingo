@@ -2,7 +2,9 @@
 import AppKit
 import Foundation
 
-let screenshotPath = "docs/assets/screenshot-main.png"
+let rawPath = "docs/assets/screenshot-raw.png"
+let fallbackPath = "docs/assets/screenshot-main.png"
+let screenshotPath = FileManager.default.fileExists(atPath: rawPath) ? rawPath : fallbackPath
 guard let screenshotImage = NSImage(contentsOfFile: screenshotPath) else {
     print("❌ 无法读取截图：\(screenshotPath)")
     exit(1)
@@ -78,7 +80,7 @@ screenClipPath.addClip()
 NSColor.black.setFill()
 screenRect.fill()
 
-// 绘制截图内容 (Aspect Fill 填充)
+// 绘制截图内容 (顶部完全对齐，严禁裁切顶上内容，多余高度在底部自然裁切)
 let srcSize = screenshotImage.size
 let scaleX = screenW / srcSize.width
 let scaleY = screenH / srcSize.height
@@ -86,7 +88,11 @@ let fillScale = max(scaleX, scaleY)
 let drawW = srcSize.width * fillScale
 let drawH = srcSize.height * fillScale
 let drawX = screenX + (screenW - drawW) / 2
-let drawY = screenY + (screenH - drawH) / 2
+// 在 Cocoa 坐标系中 (原点在左下角)：
+// 屏幕顶部为 screenY + screenH
+// 图像绘制区域的顶部为 drawY + drawH
+// 要保证顶部完全对齐、绝不裁切顶上内容：drawY + drawH = screenY + screenH => drawY = screenY + screenH - drawH
+let drawY = screenY + screenH - drawH
 
 screenshotImage.draw(in: CGRect(x: drawX, y: drawY, width: drawW, height: drawH), from: .zero, operation: .sourceOver, fraction: 1.0)
 
