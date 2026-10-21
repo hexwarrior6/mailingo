@@ -1,6 +1,6 @@
 XCODEGEN_VERSION := 2.46.0
 XCODEGEN := .tools/xcodegen/bin/xcodegen
-DERIVED  := .build/DerivedData
+DERIVED  := $(CURDIR)/.build/DerivedData
 CONFIG   := Debug
 APP      := $(DERIVED)/Build/Products/$(CONFIG)/Mailingo.app
 APPEX    := $(APP)/Contents/PlugIns/MailingoMailExtension.appex
