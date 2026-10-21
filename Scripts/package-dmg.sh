@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 制作 Mailingo 预编译分发产物（DMG 镜像与 ZIP 包）
 #
-# 采用 Sindre Sorhus 官方现代方案（Lungo / create-dmg 架构）
-# 特性：纯净粗线条「>」指示，自动规避 Finder 滚动条，160px 大图标对称居中
+# 架构：采用 appdmg 直接注入定制背景图与 .DS_Store
+# 效果：纯净粗线条「>」指示箭头，零多余文字，无滚动条，160px 大图标对称居中
 #
 # 用法：
 #   Scripts/package-dmg.sh [APP_PATH] [OUTPUT_DIR]
@@ -48,21 +48,39 @@ fi
 mkdir -p "$OUTPUT_DIR"
 DMG_PATH="$OUTPUT_DIR/Mailingo.dmg"
 ZIP_PATH="$OUTPUT_DIR/Mailingo.zip"
+BKG_IMG="$ROOT_DIR/Design/dmg-background@2x.png"
 
-# 3. 采用 Sindre Sorhus 原生方案（零滚动条，纯净粗箭头，居中 160px 图标）
+# 3. 采用 appdmg 制作带粗「>」背景图与居中布局的无滚动条 DMG
 echo "💿 制作极简标准 DMG 镜像..."
 rm -f "$DMG_PATH"
 
 if command -v npx >/dev/null 2>&1; then
-  echo "🚀 使用 Sindre 官方 create-dmg 构建 (Lungo 架构)..."
-  npx --yes create-dmg "$APP_PATH" "$OUTPUT_DIR" \
-    --overwrite \
-    --no-version-in-filename \
-    --no-code-sign \
-    --dmg-title="Mailingo" || {
-      echo "⚠️ npx create-dmg 异常，降级到原生 hdiutil..."
-      FALLBACK_HDIUTIL=1
+  echo "🚀 使用 appdmg 注入定制背景图与视图规格..."
+  APPDMG_JSON="$(mktemp -t mailingo-appdmg-XXXXXX).json"
+  cat > "$APPDMG_JSON" <<EOF
+{
+  "title": "Mailingo",
+  "background": "$BKG_IMG",
+  "icon-size": 160,
+  "format": "UDZO",
+  "window": {
+    "size": {
+      "width": 660,
+      "height": 400
     }
+  },
+  "contents": [
+    { "x": 180, "y": 170, "type": "file", "path": "$APP_PATH" },
+    { "x": 480, "y": 170, "type": "link", "path": "/Applications" }
+  ]
+}
+EOF
+
+  npx --yes appdmg "$APPDMG_JSON" "$DMG_PATH" || {
+    echo "⚠️ appdmg 执行异常，降级到原生 hdiutil..."
+    FALLBACK_HDIUTIL=1
+  }
+  rm -f "$APPDMG_JSON"
 else
   FALLBACK_HDIUTIL=1
 fi
