@@ -261,15 +261,15 @@
       display: block;
     }
 
-    /* 特性四宫格 (稳定 2x2 网格，绝不落单) */
+    /* 特性六宫格 (稳固 2x3 网格，左右严格对称) */
     .features-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
-      gap: 24px;
+      gap: 22px;
       margin-bottom: 96px;
     }
 
-    @media (max-width: 640px) {
+    @media (max-width: 680px) {
       .features-grid {
         grid-template-columns: 1fr;
         gap: 16px;
@@ -279,28 +279,34 @@
     .feature-card {
       background-color: var(--surface);
       border: 1px solid var(--surface-border);
-      padding: 28px 26px;
+      padding: 26px 24px;
       border-radius: 16px;
       box-shadow: var(--shadow-sm);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-lg);
     }
 
     .feature-icon {
-      font-size: 1.6rem;
-      margin-bottom: 14px;
+      font-size: 1.5rem;
+      margin-bottom: 12px;
       display: inline-block;
     }
 
     .feature-card h3 {
-      font-size: 1.1rem;
+      font-size: 1.08rem;
       font-weight: 600;
       margin-bottom: 8px;
       letter-spacing: -0.01em;
     }
 
     .feature-card p {
-      font-size: 0.92rem;
+      font-size: 0.9rem;
       color: var(--text-muted);
-      line-height: 1.6;
+      line-height: 1.58;
     }
 
     /* 区域统一标题 */
@@ -489,30 +495,47 @@
       <img src="assets/screenshot-main.png" alt="Mailingo 界面演示截图">
     </div>
 
-    <!-- 核心特性四宫格 (稳固 2x2 对称排版) -->
+    <!-- 核心特性六宫格 (2x3 对称排版) -->
+    <div class="section-header" style="margin-bottom: 36px;">
+      <h2 class="section-title">核心特性</h2>
+      <p class="section-subtitle">专为原生邮件阅读体验打磨的每个技术细节</p>
+    </div>
+
     <section class="features-grid">
       <div class="feature-card">
-        <span class="feature-icon">📑</span>
-        <h3>1:1 像素级排版保留</h3>
-        <p>基于 HTML 切片替换管线，复杂响应式表格、按钮样式与图文混排完整保留，彻底告别文字剥离导致的格式错乱。</p>
+        <span class="feature-icon">⚡</span>
+        <h3>纯机器翻译 · 毫秒离线</h3>
+        <p>支持调用 Apple 系统原生翻译能力，毫秒级即时响应，数据无需流经第三方，零调用额度费用。</p>
       </div>
 
       <div class="feature-card">
-        <span class="feature-icon">📬</span>
-        <h3>Mail 原生横幅接入</h3>
-        <p>集成 Apple MailKit 邮件安全扩展点，阅读窗格顶部直接显示翻译入口，由 Mail 递送 MIME，无需任何自动化授权。</p>
+        <span class="feature-icon">🧠</span>
+        <h3>大模型精翻 · 深度语境</h3>
+        <p>可接入主流大语言模型，智能感知外语邮件上下文语境与行业专业术语，长文表达流畅地道。</p>
       </div>
 
       <div class="feature-card">
         <span class="feature-icon">🖼️</span>
-        <h3>CID 内嵌图协议支持</h3>
-        <p>自定义 WebKit Scheme 处理器，正确解析渲染邮件签名档 Logo 与正文内嵌截图，彻底告别空白占位符。</p>
+        <h3>邮件图片 · 原地替换翻译</h3>
+        <p>自动识别邮件内嵌海报、宣传图与图表中的文字，原地识别并图文覆盖渲染，读图顺畅无隔阂。</p>
       </div>
 
       <div class="feature-card">
-        <span class="feature-icon">⚡</span>
-        <h3>关窗即退 · 零常驻内存</h3>
-        <p>窗口关闭即刻调用进程退出，平时不常驻任何后台守护进程，不用时不占系统 1 字节内存。</p>
+        <span class="feature-icon">📑</span>
+        <h3>1:1 内容排版镜像</h3>
+        <p>HTML 字节级切片替换管线，响应式表格、CSS 样式、按钮与图文混排结构像素级保真。</p>
+      </div>
+
+      <div class="feature-card">
+        <span class="feature-icon">📱</span>
+        <h3>超宽排版 · 智能自适应</h3>
+        <p>自动注入响应式布局约束，大图与宽表格自适应当前窗口视宽，彻底告别恼人的横向滚动条。</p>
+      </div>
+
+      <div class="feature-card">
+        <span class="feature-icon">💬</span>
+        <h3>智能历史引用折叠</h3>
+        <p>自动识别 Apple Mail、Gmail 与 Outlook 多轮历史邮件并折叠收起，只翻译当前新增正文。</p>
       </div>
     </section>
 
