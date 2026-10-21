@@ -15,6 +15,14 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 APP_PATH="${1:-$ROOT_DIR/.build/DerivedData/Build/Products/Release/Mailingo.app}"
 OUTPUT_DIR="${2:-$ROOT_DIR/.build/dist}"
 
+# 转换为绝对路径，避免 appdmg 在临时目录解析相对路径失败
+if [ -d "$APP_PATH" ]; then
+  APP_DIR="$(cd "$(dirname "$APP_PATH")" && pwd)"
+  APP_PATH="$APP_DIR/$(basename "$APP_PATH")"
+fi
+mkdir -p "$OUTPUT_DIR"
+OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
+
 if [ ! -d "$APP_PATH" ]; then
   DEBUG_APP="$ROOT_DIR/.build/DerivedData/Build/Products/Debug/Mailingo.app"
   if [ -d "$DEBUG_APP" ]; then
@@ -61,7 +69,7 @@ if command -v npx >/dev/null 2>&1; then
 {
   "title": "Mailingo",
   "background": "$BKG_IMG",
-  "icon-size": 160,
+  "icon-size": 128,
   "format": "UDZO",
   "window": {
     "size": {
