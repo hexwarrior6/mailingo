@@ -82,19 +82,37 @@ jobs:
           prerelease: false
           generate_release_notes: true
           body: |
-            ### 📦 安装包下载
-            
-            - **[Mailingo.dmg](https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.tag }}/Mailingo.dmg)**：拖拽即可安装至 `/Applications`。
-            - **[Mailingo.zip](https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.tag }}/Mailingo.zip)**：免挂载直接解压版。
-            
-            ### 🛡️ 首次运行说明（Gatekeeper 放行）
-            因未接入付费 Apple 证书，首次打开如果系统提示*“无法打开”*或*“已损坏”*，请在终端执行一次放行命令：
+            ## Installation
+
+            ### Method 1: DMG Installer (Recommended)
+            1. Download [`Mailingo.dmg`](https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.tag }}/Mailingo.dmg) and drag `Mailingo.app` into `/Applications`.
+            2. Remove the macOS Gatekeeper quarantine attribute (required for ad-hoc signed open-source releases):
+               ```bash
+               xattr -cr /Applications/Mailingo.app
+               ```
+            3. Relaunch Apple Mail, then enable **Mailingo** in **Settings (`⌘,`) → Extensions**.
+
+            ### Method 2: Terminal One-liner
             ```bash
-            xattr -cr /Applications/Mailingo.app
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
             ```
-            然后在 Apple Mail 的「设置」→「扩展」中勾选 **Mailingo** 即可开启使用。
-            
-            ### 🔐 SHA-256 校验和
+
+            ---
+
+            ## 安装与启用说明
+
+            1. 下载 [`Mailingo.dmg`](https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.tag }}/Mailingo.dmg) 并将 `Mailingo.app` 拖移至 `/Applications` 目录；
+            2. 在终端执行以下命令移除 Gatekeeper 隔离属性（开源自签分发所需）：
+               ```bash
+               xattr -cr /Applications/Mailingo.app
+               ```
+            3. 完全退出并重新启动 Apple Mail，前往 **设置 (`⌘,`) → 扩展** 勾选启用 **Mailingo**。
+
+            ---
+
+            ## Verification
+
+            SHA-256 Checksums:
             ```text
             ${{ steps.meta.outputs.checksums }}
             ```
