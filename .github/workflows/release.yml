@@ -84,35 +84,22 @@ jobs:
           body: |
             ## Installation
 
-            ### Method 1: DMG Installer (Recommended)
             1. Download [`Mailingo.dmg`](https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.tag }}/Mailingo.dmg) and drag `Mailingo.app` into `/Applications`.
-            2. Remove the macOS Gatekeeper quarantine attribute (required for ad-hoc signed open-source releases):
+            2. Clear the Gatekeeper quarantine attribute for the self-signed binary:
                ```bash
                xattr -cr /Applications/Mailingo.app
                ```
-            3. Relaunch Apple Mail, then enable **Mailingo** in **Settings (`⌘,`) → Extensions**.
+            3. Relaunch Apple Mail, then enable **Mailingo** under **Settings (`⌘,`) → Extensions**.
 
-            ### Method 2: Terminal One-liner
+            ### Quick Install via Terminal
+
+            You can also run the following one-liner to download, install, and configure permissions automatically:
             ```bash
             curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
             ```
 
-            ---
+            ## Checksums (SHA-256)
 
-            ## 安装与启用说明
-
-            1. 下载 [`Mailingo.dmg`](https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.tag }}/Mailingo.dmg) 并将 `Mailingo.app` 拖移至 `/Applications` 目录；
-            2. 在终端执行以下命令移除 Gatekeeper 隔离属性（开源自签分发所需）：
-               ```bash
-               xattr -cr /Applications/Mailingo.app
-               ```
-            3. 完全退出并重新启动 Apple Mail，前往 **设置 (`⌘,`) → 扩展** 勾选启用 **Mailingo**。
-
-            ---
-
-            ## Verification
-
-            SHA-256 Checksums:
             ```text
             ${{ steps.meta.outputs.checksums }}
             ```
