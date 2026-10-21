@@ -188,7 +188,7 @@ final class InspectorModel: ObservableObject {
         case failed(String)
     }
 
-    /// 每张内联图的翻译状态 —— 驱动图右下角的角标文案。
+    /// 每张内联图的翻译状态 —— 驱动图左上角的角标文案。
     /// 换邮件时整体清空（见 `analyze`）。
     @Published private(set) var imageTranslations: [String: ImageTranslationState] = [:]
     /// 已翻译的图源（渲染好的整图），scheme handler 用它替换原图字节。

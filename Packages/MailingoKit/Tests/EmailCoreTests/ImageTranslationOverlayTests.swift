@@ -26,6 +26,7 @@ final class ImageTranslationOverlayTests: XCTestCase {
         XCTAssertTrue(out.contains(#"href="mailingo-imgtrans://\#(encodedCid)""#), "角标 href 应指向翻译动作")
         XCTAssertTrue(out.contains(">文A</a>"))
         XCTAssertTrue(out.contains(#"<span style="position:relative!"#), "装饰层应有定位样式")
+        XCTAssertTrue(out.contains("left:6px!important;top:6px!important;"), "角标应定位在左上角")
         XCTAssertTrue(out.contains(img()), "原图标签原样保留")
     }
 
@@ -76,13 +77,22 @@ final class ImageTranslationOverlayTests: XCTestCase {
         XCTAssertTrue(out.contains(#"<a href="https://shop.example/promo">"#))
     }
 
-    /// 复杂锚点内容（img 外面还包着别的标签）暂不支持 —— 应回退为不注入，
-    /// 绝不能产生嵌套锚点。
-    func testComplexAnchorContentFallsBackToNoBadge() {
+    /// 复杂锚点内容（img 外面包着 span、u、注释等）应正确注入角标，作为锚点的兄弟节点，绝不产生嵌套锚点。
+    func testComplexAnchorContentGetsSiblingBadge() {
         let html = #"<p><a href="https://shop.example"><span style="x">\#(img())</span></a></p>"#
         let out = ImageTranslationOverlay.inject(into: html, badges: [cid: .translate])
 
-        XCTAssertEqual(out, html, "复杂锚点内容不注入（避免嵌套锚点破坏 DOM）")
+        XCTAssertTrue(out.contains(#"<a href="https://shop.example"><span style="x">"#), "商品链接与内部标签原样保留")
+        XCTAssertTrue(out.contains("</span></a><a href=\"mailingo-imgtrans"), "角标应在 </a> 之后作为兄弟注入（非嵌套）")
+        XCTAssertTrue(out.contains(">文A</a>"))
+    }
+
+    func testAnchorWithCommentsGetsSiblingBadge() {
+        let html = #"<p><a href="https://figma.example"><img src="mailingo-cid://\#(encodedCid)"><!--[if !mso]><! --></a></p>"#
+        let out = ImageTranslationOverlay.inject(into: html, badges: [cid: .translate])
+
+        XCTAssertTrue(out.contains("<!--[if !mso]><! --></a><a href=\"mailingo-imgtrans"), "带有 HTML 注释的锚点也能正确注入兄弟角标")
+        XCTAssertTrue(out.contains(">文A</a>"))
     }
 
     // MARK: - 外部图片（远程）
@@ -117,6 +127,15 @@ final class ImageTranslationOverlayTests: XCTestCase {
         XCTAssertEqual(out.components(separatedBy: "mailingo-imgtrans://").count - 1, 2)
         XCTAssertTrue(out.contains("mailingo-imgout://\(encodedCid)"), "restore 的图走译文 scheme")
         XCTAssertFalse(out.contains("mailingo-imgout://banner%4002DC"), "translate 的图保持原图源")
+    }
+
+    func testAnchorWithVisibleTextDoesNotForceZeroLineHeight() {
+        let html = #"<p><a href="https://example.com/demo.mp4">\#(img()) Watch video</a></p>"#
+        let out = ImageTranslationOverlay.inject(into: html, badges: [cid: .translate])
+
+        XCTAssertTrue(out.contains("position:relative!important;display:inline-block!important;"), "带有可见文字的超链接应保留包装层定位")
+        XCTAssertFalse(out.contains("line-height:0!important;"), "带有可见文字的超链接不应强加 line-height:0")
+        XCTAssertTrue(out.contains(">文A</a>"))
     }
 
     // MARK: - 动作 URL 解析

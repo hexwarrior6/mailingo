@@ -1,6 +1,6 @@
 import Foundation
 
-/// 给邮件里的图片注入"图片翻译"角标（图右下角的小按钮）。
+/// 给邮件里的图片注入"图片翻译"角标（图左上角的小按钮）。
 ///
 /// ## 只作用于渲染副本
 ///
@@ -83,8 +83,9 @@ public enum ImageTranslationOverlay {
         guard !badges.isEmpty, html.lowercased().contains("<img") else { return html }
 
         // 先尝试「锚点包图」形态（组 1-2：锚点整体 / img），再尝试裸 img（组 3）
-        // —— 一趟扫描，避免二次包装。src 的取值在 replacement 里再提取分类。
-        let pattern = #"(?i)(<a\b[^>]*>\s*(<img\b[^>]*>)\s*</a>)|(<img\b[^>]*>)"#
+        // —— 一趟扫描，避免二次包装。
+        // 组 1-2 匹配整个 <a>...</a> 结构，兼容营销邮件中带有 <span>、<u>、<div>、注释等的包图结构。
+        let pattern = #"(?is)(<a\b[^>]*>(?:(?!</a\b|(?i:<img\b)).)*?(<img\b[^>]*>)(?:(?!</a\b).)*?</a>)|(<img\b[^>]*>)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return html }
 
         let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
@@ -184,14 +185,35 @@ public enum ImageTranslationOverlay {
             let imgTag = String(html[imgRange])
             guard let srcValue = srcValue(in: imgTag),
                   let key = badgeKey(forSrcValue: srcValue),
-                  let badge = badges[key] else { return anchorWithImg }
+                  let badge = badges[key] ?? badges[srcValue] else { return anchorWithImg }
 
-            // 已翻译时仅替换 img 的图源 scheme；其余字节原样保留
-            let img = badge == .restore ? rewrittenSource(imgTag, srcValue: srcValue, key: key) : imgTag
-            let inner = anchorWithImg.replacingOccurrences(of: imgTag, with: img)
+            // 已翻译时替换 img 的图源 scheme；其余字节原样保留。
+            // 若锚点内有多张图（如深浅模式切换图），对每张在 badges 中为 restore 的图都执行替换
+            var inner = anchorWithImg
+            if let allImgRegex = try? NSRegularExpression(pattern: #"(?is)<img\b[^>]*>"#) {
+                let imgMatches = allImgRegex.matches(in: anchorWithImg, range: NSRange(anchorWithImg.startIndex..., in: anchorWithImg))
+                for m in imgMatches.reversed() {
+                    guard let r = Range(m.range, in: anchorWithImg) else { continue }
+                    let subImg = String(anchorWithImg[r])
+                    if let sv = Self.srcValue(in: subImg),
+                       let k = Self.badgeKey(forSrcValue: sv),
+                       (badges[k] ?? badges[sv]) == .restore {
+                        let rew = rewrittenSource(subImg, srcValue: sv, key: k)
+                        inner = inner.replacingOccurrences(of: subImg, with: rew)
+                    }
+                }
+            } else {
+                let img = badge == .restore ? rewrittenSource(imgTag, srcValue: srcValue, key: key) : imgTag
+                inner = anchorWithImg.replacingOccurrences(of: imgTag, with: img)
+            }
+
             let button = badgeAnchor(key: key, badge: badge)
-            // 角标是锚点的**兄弟**（不是嵌进锚点里），装饰层包住两者
-            return #"<span style="\#(wrapperStyle)">\#(inner)\#(button)</span>"#
+            // 角标是锚点的**兄弟**（不是嵌进锚点里），装饰层包住两者。
+            // 纯图超链接加 line-height:0 消除基线缝隙；若超链接内带有文字，保留正常行高避免文字挤压。
+            let style = hasVisibleText(in: anchorWithImg, excluding: imgTag)
+                ? "position:relative!important;display:inline-block!important;"
+                : wrapperStyle
+            return #"<span style="\#(style)">\#(inner)\#(button)</span>"#
         }
 
         // 组 3 = 裸 img
@@ -201,11 +223,10 @@ public enum ImageTranslationOverlay {
         let imgTag = String(html[imgRange])
         guard let srcValue = srcValue(in: imgTag),
               let key = badgeKey(forSrcValue: srcValue),
-              let badge = badges[key] else { return imgTag }
+              let badge = badges[key] ?? badges[srcValue] else { return imgTag }
 
-        // 裸 img 但实际上包在**复杂锚点**里（img 外面还有其他标签）：
-        // 注入角标会产生嵌套锚点破坏 DOM —— 宁可不加角标也不能弄坏邮件。
-        // （简单形态 `<a><img></a>` 已被组 1-2 优先处理，不会走到这里。）
+        // 裸 img 但实际上包在**未闭合锚点**或复杂结构里：
+        // 注入角标会产生嵌套锚点破坏 DOM —— 此时宁可不加角标也不能弄坏邮件。
         let before = html.startIndex..<imgRange.lowerBound
         let lastOpen = html.range(of: "<a", options: .backwards, range: before)
         let lastClose = html.range(of: "</a", options: .backwards, range: before)
@@ -222,6 +243,18 @@ public enum ImageTranslationOverlay {
         return #"<span style="\#(wrapperStyle)">\#(img)\#(button)</span>"#
     }
 
+    /// 检查 HTML 片段在剔除 img 标签后是否含有非空可见文本。
+    private static func hasVisibleText(in htmlFragment: String, excluding imgTag: String) -> Bool {
+        var text = htmlFragment.replacingOccurrences(of: imgTag, with: "")
+        if let commentRegex = try? NSRegularExpression(pattern: #"(?s)<!--.*?-->"#) {
+            text = commentRegex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "")
+        }
+        if let tagRegex = try? NSRegularExpression(pattern: #"<[^>]+>"#) {
+            text = tagRegex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "")
+        }
+        return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// 已翻译时把 img 的图源换成译文 scheme —— URL 变化使 WebKit 缓存失效。
     /// 输出 URL 一律由**解码后的键**生成（原始 src 值可能带 HTML 实体），
     /// 这样渲染层取图时的键与结果字典完全一致。
@@ -236,6 +269,6 @@ public enum ImageTranslationOverlay {
 
     private static func badgeAnchor(key: String, badge: Badge) -> String {
         // 正圆（24×24、border-radius 50%）：文字紧凑、去内边距与字距
-        return #"<a href="\#(actionURLString(forContentID: key))" title="\#(badge.tooltip)" style="position:absolute!important;right:6px!important;bottom:6px!important;display:inline-block!important;width:24px!important;height:24px!important;padding:0!important;border-radius:50%!important;background:rgba(20,20,20,0.55)!important;color:#fff!important;font:600 10px/24px -apple-system,'Helvetica Neue',sans-serif!important;text-align:center!important;text-decoration:none!important;-webkit-user-select:none!important;letter-spacing:-0.5px!important;">\#(badge.label)</a>"#
+        return #"<a href="\#(actionURLString(forContentID: key))" title="\#(badge.tooltip)" style="position:absolute!important;left:6px!important;top:6px!important;display:inline-block!important;width:24px!important;height:24px!important;padding:0!important;border-radius:50%!important;background:rgba(20,20,20,0.55)!important;color:#fff!important;font:600 10px/24px -apple-system,'Helvetica Neue',sans-serif!important;text-align:center!important;text-decoration:none!important;-webkit-user-select:none!important;letter-spacing:-0.5px!important;">\#(badge.label)</a>"#
     }
 }

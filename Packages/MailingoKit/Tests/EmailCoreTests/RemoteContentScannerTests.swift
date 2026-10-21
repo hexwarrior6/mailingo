@@ -59,4 +59,10 @@ final class RemoteContentScannerTests: XCTestCase {
         // 营销邮件 fixture 里有 logo + 追踪像素两张远程图
         XCTAssertEqual(RemoteContentScanner.remoteImageCount(in: analysis.originalHTML), 2)
     }
+
+    func testDecodesHTMLEntitiesInRemoteImageURLs() {
+        let html = #"<img src="https://cdn.example.com/pic.png?w=600&amp;h=400&amp;token=abc">"#
+        let urls = RemoteContentScanner.remoteImageURLs(in: html)
+        XCTAssertEqual(urls, ["https://cdn.example.com/pic.png?w=600&h=400&token=abc"])
+    }
 }

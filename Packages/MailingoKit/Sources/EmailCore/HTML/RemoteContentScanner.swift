@@ -21,8 +21,8 @@ public enum RemoteContentScanner {
     /// 邮件里全部外部图片的 src（文档顺序，去重）。
     ///
     /// 图片翻译的角标按这个清单铺：这些图要能被点「译」，就得先知道它们是谁。
-    /// 注意 src 里的 HTML 实体（`&amp;` 等）**不在这里解码** —— 调用方按需处理，
-    /// 因为改写回 HTML 时必须保持实体原样。
+    /// 这里统一进行 HTML 实体解码（如 `&amp;` → `&`），确保获取到合法的网络 URL，
+    /// 并且与 `ImageTranslationOverlay` 提取的 `badgeKey` 完全一致。
     public static func remoteImageURLs(in html: String) -> [String] {
         guard let tagRegex = try? NSRegularExpression(pattern: #"(?is)<img\b[^>]*>"#) else { return [] }
         guard let srcRegex = try? NSRegularExpression(pattern: #"(?is)\bsrc\s*=\s*["']?\s*(https?://[^"'\s>]+)"#) else { return [] }
@@ -35,7 +35,8 @@ public enum RemoteContentScanner {
             let tag = String(html[tagRange])
             guard let srcMatch = srcRegex.firstMatch(in: tag, range: NSRange(tag.startIndex..., in: tag)),
                   let valueRange = Range(srcMatch.range(at: 1), in: tag) else { continue }
-            let url = String(tag[valueRange])
+            let rawURL = String(tag[valueRange])
+            let url = HTMLEntities.decode(rawURL)
             if seen.insert(url).inserted { urls.append(url) }
         }
         return urls

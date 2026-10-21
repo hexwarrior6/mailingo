@@ -437,7 +437,7 @@ private struct TranslationSettingsView: View {
                     }
             }
 
-            Toggle("图片自动翻译（默认手动点图片右下角的「文A」）", isOn: $autoTranslateImages)
+            Toggle("图片自动翻译（默认手动点图片左上角的「文A」）", isOn: $autoTranslateImages)
         } header: {
             Text("图片翻译")
         } footer: {
