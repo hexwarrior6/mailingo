@@ -11,7 +11,7 @@ LOG      := $(LOGDIR)/probe.log
 SPMDIR   := $(CURDIR)/.build/spm
 
 
-.PHONY: help bootstrap gen build test check-render check-reply-quotes check-message-store run register status log stream diagnose clean reset-log install-app verify-appex refresh-plugins appicon appicon-project
+.PHONY: help bootstrap gen build test check-render check-reply-quotes check-message-store run register status log stream diagnose clean reset-log install-app verify-appex refresh-plugins appicon appicon-project dmg
 
 help:
 	@echo "make check-message-store 验证多版本邮件与旧翻译横幅的定位和清理"
@@ -19,6 +19,7 @@ help:
 	@echo "make bootstrap  下载 XcodeGen 到 .tools/（无需 sudo，固定版本；克隆后先跑这个）"
 	@echo "make gen        生成 Mailingo.xcodeproj（XcodeGen）"
 	@echo "make build      编译（含 appex 嵌入）"
+	@echo "make dmg        打包为 DMG 镜像和 ZIP（可加 CONFIG=Release）"
 	@echo "make test       跑 EmailCore 单元测试（23 个）"
 	@echo "make appicon    从 ART=<画稿.png> 生成 App 图标（可加 SHRINK=88）"
 	@echo "make appicon-project  用项目画稿重新生成正式图标（CROP=80）"
@@ -59,6 +60,9 @@ gen:
 build: gen
 	xcodebuild -project Mailingo.xcodeproj -scheme Mailingo -configuration $(CONFIG) \
 	  -derivedDataPath $(DERIVED) build
+
+dmg: build
+	@bash Scripts/package-dmg.sh "$(APP)" "$(CURDIR)/.build/dist"
 
 # 核心逻辑的单元测试。之所以用 `swift test` 而不是 xcodebuild：
 #  - 不依赖 Xcode 工程与签名，跑一次不到一秒，适合边写边跑
