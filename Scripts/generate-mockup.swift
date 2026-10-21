@@ -41,38 +41,38 @@ shadowPath.fill()
 let lidW: CGFloat = 3180
 let lidX: CGFloat = (totalW - lidW) / 2 // 365
 
-// 极窄等宽边框 (Top: 20px, Left: 20px, Right: 20px, Chin: 26px)
-let bezelSize: CGFloat = 20
-let chinSize: CGFloat = 26
+// 适度加粗边框 (Top: 40px, Left: 40px, Right: 40px, Chin: 48px，比例更稳重大气)
+let bezelSize: CGFloat = 40
+let chinSize: CGFloat = 48
 
-let screenW: CGFloat = lidW - (bezelSize * 2) // 3140
+let screenW: CGFloat = lidW - (bezelSize * 2) // 3100
 let srcSize = screenshotImage.size
-let scale = screenW / srcSize.width // 3140 / 2940 = 1.068027
-let screenH: CGFloat = round(srcSize.height * scale) // 2042
+let scale = screenW / srcSize.width // 3100 / 2940 = 1.05442
+let screenH: CGFloat = round(srcSize.height * scale) // 2016
 
-let lidH: CGFloat = screenH + bezelSize + chinSize // 2088
-let lidY: CGFloat = 80 // 距离底部底座的位置
+let lidH: CGFloat = screenH + bezelSize + chinSize // 2104
+let lidY: CGFloat = 74 // 距离底部底座的位置
 
 // 上盖外框 (深空灰铝合金)
 let lidOuterRect = CGRect(x: lidX, y: lidY, width: lidW, height: lidH)
-let lidOuterPath = NSBezierPath(roundedRect: lidOuterRect, xRadius: 36, yRadius: 36)
+let lidOuterPath = NSBezierPath(roundedRect: lidOuterRect, xRadius: 40, yRadius: 40)
 NSColor(red: 0.58, green: 0.59, blue: 0.61, alpha: 1.0).setFill() // 外壳铝合金银灰
 lidOuterPath.fill()
 
 // 屏幕外圈纯黑窄边框 (全面屏薄中框)
-let bezelRect = lidOuterRect.insetBy(dx: 6, dy: 6)
-let bezelPath = NSBezierPath(roundedRect: bezelRect, xRadius: 32, yRadius: 32)
+let bezelRect = lidOuterRect.insetBy(dx: 8, dy: 8)
+let bezelPath = NSBezierPath(roundedRect: bezelRect, xRadius: 36, yRadius: 36)
 NSColor(red: 0.07, green: 0.07, blue: 0.08, alpha: 1.0).setFill()
 bezelPath.fill()
 
 // 3. 屏幕显示区域 (Active Display Area)
-let screenX: CGFloat = lidX + bezelSize // 385
-let screenY: CGFloat = lidY + chinSize  // 106
+let screenX: CGFloat = lidX + bezelSize // 405
+let screenY: CGFloat = lidY + chinSize  // 122
 let screenRect = CGRect(x: screenX, y: screenY, width: screenW, height: screenH)
 
 // 现代 MacBook 屏幕顶部弧度 (Liquid Retina XDR 圆角)
 let screenClipPath = NSBezierPath()
-let screenRadius: CGFloat = 16
+let screenRadius: CGFloat = 18
 let left = screenRect.minX
 let right = screenRect.maxX
 let bottom = screenRect.minY
