@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # 制作 Mailingo 预编译分发产物（DMG 镜像与 ZIP 包）
 #
+# 采用 Sindre Sorhus 官方现代方案（Lungo / create-dmg 架构）
+# 特性：纯净粗线条「>」指示，自动规避 Finder 滚动条，160px 大图标对称居中
+#
 # 用法：
 #   Scripts/package-dmg.sh [APP_PATH] [OUTPUT_DIR]
-# 默认：
-#   APP_PATH:   .build/DerivedData/Build/Products/Release/Mailingo.app
-#   OUTPUT_DIR: .build/dist
 
 set -euo pipefail
 
@@ -48,32 +48,19 @@ fi
 mkdir -p "$OUTPUT_DIR"
 DMG_PATH="$OUTPUT_DIR/Mailingo.dmg"
 ZIP_PATH="$OUTPUT_DIR/Mailingo.zip"
-BKG_IMG="$ROOT_DIR/Design/dmg-background@2x.png"
 
-# 3. 优先使用 create-dmg 制作带精美布局与背景图的 DMG
-if command -v create-dmg >/dev/null 2>&1; then
-  echo "💿 使用 create-dmg 制作带布局背景的精美 DMG..."
-  rm -f "$DMG_PATH"
-  
-  # create-dmg 参数说明：
-  # --window-size 660 400: 窗口尺寸
-  # --icon-size 128: 图标大小
-  # --icon "Mailingo.app" 180 210: 左侧应用位置
-  # --app-drop-link 480 210: 右侧 Applications 替身位置
-  # --hide-extension: 隐藏 .app 后缀保持视觉干净
-  create-dmg \
-    --volname "Mailingo" \
-    --background "$BKG_IMG" \
-    --window-pos 200 120 \
-    --window-size 660 400 \
-    --icon-size 128 \
-    --icon "Mailingo.app" 180 210 \
-    --hide-extension "Mailingo.app" \
-    --app-drop-link 480 210 \
-    --no-internet-enable \
-    "$DMG_PATH" \
-    "$APP_PATH" || {
-      echo "⚠️ create-dmg 构建异常，降级到原生 hdiutil..."
+# 3. 采用 Sindre Sorhus 原生方案（零滚动条，纯净粗箭头，居中 160px 图标）
+echo "💿 制作极简标准 DMG 镜像..."
+rm -f "$DMG_PATH"
+
+if command -v npx >/dev/null 2>&1; then
+  echo "🚀 使用 Sindre 官方 create-dmg 构建 (Lungo 架构)..."
+  npx --yes create-dmg "$APP_PATH" "$OUTPUT_DIR" \
+    --overwrite \
+    --no-version-in-filename \
+    --no-code-sign \
+    --dmg-title="Mailingo" || {
+      echo "⚠️ npx create-dmg 异常，降级到原生 hdiutil..."
       FALLBACK_HDIUTIL=1
     }
 else

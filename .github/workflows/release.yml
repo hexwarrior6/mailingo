@@ -27,10 +27,8 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - name: 准备构建工具 (XcodeGen 与 create-dmg)
-        run: |
-          make bootstrap
-          brew install create-dmg
+      - name: 准备构建工具 (XcodeGen)
+        run: make bootstrap
 
       - name: 执行单元测试
         run: make test
