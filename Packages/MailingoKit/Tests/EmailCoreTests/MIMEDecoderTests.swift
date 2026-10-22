@@ -180,4 +180,33 @@ final class MIMEDecoderTests: XCTestCase {
         XCTAssertNil(decoded.html)
         XCTAssertNil(decoded.plainText)
     }
+
+    // MARK: - 附件图片解析
+
+    func testAttachedImageWithoutContentIDGetsSyntheticCIDAndInlineResource() throws {
+        let raw = Data("""
+        Content-Type: multipart/mixed; boundary="boundary-att"\r
+        \r
+        --boundary-att\r
+        Content-Type: text/html; charset="utf-8"\r
+        \r
+        <p>Email with attachment</p>\r
+        --boundary-att\r
+        Content-Type: image/jpeg; name="flyer.jpg"\r
+        Content-Disposition: attachment; filename="flyer.jpg"\r
+        Content-Transfer-Encoding: base64\r
+        \r
+        /9j/4AAQSkZJRg==\r
+        --boundary-att--\r
+        """.utf8)
+
+        let decoded = try decoder.decode(raw)
+        XCTAssertEqual(decoded.html, "<p>Email with attachment</p>")
+        XCTAssertEqual(decoded.attachments.count, 1)
+        let att = decoded.attachments[0]
+        XCTAssertEqual(att.filename, "flyer.jpg")
+        XCTAssertEqual(att.mimeType, "image/jpeg")
+        XCTAssertTrue(att.contentID.contains("@mailingo"))
+        XCTAssertNotNil(decoded.inlineResources[att.contentID])
+    }
 }

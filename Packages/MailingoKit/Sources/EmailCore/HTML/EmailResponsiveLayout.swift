@@ -10,12 +10,17 @@ import Foundation
 /// 1. 出现全局水平滚动条，内容被裁切；
 /// 2. 大图只显示一半，影响阅读体验。
 ///
-/// ## 为什么不能只写 `img { max-width: 100%; }`
+/// ## 表格与正文排版机制
 ///
-/// WebKit 的表格布局算法在遇到具有固定属性（如 `<table width="600">` 或 `<table style="width:600px">`）
-/// 时，单纯的 `table { max-width: 100% !important; }` 不会收缩表格！
-/// 必须配合针对非百分比宽度的 `width: auto !important; max-width: 100% !important;`，
-/// 才能使固定宽度表格自适应窄屏，同时避免破坏按百分比排版的列（如 `width="50%"`）或拉伸小按钮（如 `width="120"`）。
+/// 传统排版与营销邮件大多基于固定宽度（常见 600px–800px）设计。在分栏双语对比视图或分屏宽度下（约 350px–450px）：
+/// 1. 若仅对 `table` 应用 `max-width: 100%`，WebKit 的表格自动布局算法在遇到具有固定属性（如 `<td width="753">`
+///    或 `<table style="max-width: 480pt">`）时，不会自动缩小外层容器，导致邮件正文长段落按 700px+ 宽度排版，
+///    文字被右边缘硬性裁切截断。
+/// 2. 为此，必须对声明了固定宽度或最大宽度的容器表格施加 `width: 100% !important; max-width: 100% !important;`，
+///    确保邮件正文与卡片自适应窗口宽度，段落自然折行。
+/// 3. 与此同时，邮件落款与签名常采用多列横向 `<table>`（例如左列放置组织 Logo，右列放置文字及社媒图标）。
+///    当表格在窄屏收缩时，为防止 WebKit 将图片列过度压缩至仅剩数十像素，需通过 `:has()` 规则为带有非微缩图标
+///    的图片列保留合理的 `min-width: 120px`，确保落款 Logo 清晰保真，社媒图标水平排布不折行。
 ///
 /// ## 只作用于渲染副本
 ///
@@ -48,19 +53,70 @@ public enum EmailResponsiveLayout {
     table {
         max-width: 100% !important;
     }
-    table[width]:not([width$="%"]) {
+    /* 取消表格默认浮动：Outlook 签名常带 align="left" (对应 float:left)，在响应式收缩后会导致后续保密声明横向环绕爬上右侧 */
+    table[align="left"], table[align="right"] {
+        float: none !important;
+    }
+    table[width]:not([width$="%"]),
+    table[style*="width"]:not([style*="%"]),
+    table[style*="max-width"] {
         width: auto !important;
         max-width: 100% !important;
     }
-    table[style*="width"]:not([style*="%"]) {
-        width: auto !important;
-        max-width: 100% !important;
+    body > table,
+    body > div > table,
+    div.WordSection1 > table,
+    div.WordSection1 > div > table,
+    div[align="center"] > table[style*="width"],
+    div[align="center"] > table[style*="max-width"] {
+        width: 100% !important;
     }
     td, th {
         max-width: 100% !important;
     }
+    td[width]:not([width$="%"]),
+    td[style*="width"]:not([style*="%"]) {
+        width: auto !important;
+        max-width: 100% !important;
+    }
+    /* 落款签名区域保护：右边框分隔线所在图片列保持合适宽度 */
+    td[style*="border-right"]:has(img) {
+        min-width: 140px !important;
+    }
+    /* 小图标（社媒图标、小徽标 <= 48px）：保留自身尺寸，不缩为 0 也不撑大所在单元格 */
+    img[width="16"], img[width="18"], img[width="20"], img[width="24"],
+    img[width="26"], img[width="28"], img[width="30"], img[width="32"],
+    img[width="36"], img[width="40"], img[width="48"] {
+        max-width: none !important;
+        height: auto !important;
+        flex-shrink: 0 !important;
+    }
+    /* 仅对叶子 td 或段落限制 nowrap，绝不匹配外层大容器 td（防止正文长段落无法折行） */
+    td:not(:has(table)):has(img[width="16"]),
+    td:not(:has(table)):has(img[width="18"]),
+    td:not(:has(table)):has(img[width="20"]),
+    td:not(:has(table)):has(img[width="24"]),
+    td:not(:has(table)):has(img[width="26"]),
+    td:not(:has(table)):has(img[width="28"]),
+    td:not(:has(table)):has(img[width="30"]),
+    td:not(:has(table)):has(img[width="32"]),
+    p:has(img[width="16"]),
+    p:has(img[width="20"]),
+    p:has(img[width="24"]),
+    p:has(img[width="26"]),
+    p:has(img[width="30"]),
+    p:has(img[width="32"]) {
+        white-space: nowrap !important;
+    }
+    /* 多图标签名单元格保留至少 90px，防止并排溢出覆盖相邻列 */
+    td:not(:has(table)):has(img[width="26"]) {
+        min-width: 90px !important;
+    }
     div, section, article {
         max-width: 100% !important;
+    }
+    hr {
+        clear: both !important;
     }
     pre {
         max-width: 100% !important;

@@ -138,6 +138,35 @@ final class ImageTranslationOverlayTests: XCTestCase {
         XCTAssertTrue(out.contains(">文A</a>"))
     }
 
+    // MARK: - 小图标过滤与排版保护
+
+    func testSmallIconWithExplicitAttributesIsNotWrappedInBadge() {
+        let smallImg = #"<img src="mailingo-cid://\#(encodedCid)" width="20" height="20">"#
+        let html = #"<p>Social: \#(smallImg) @caontusg</p>"#
+        let out = ImageTranslationOverlay.inject(into: html, badges: [cid: .translate])
+
+        XCTAssertFalse(out.contains(">文A</a>"), "小尺寸社媒图标不应被添加翻译角标")
+        XCTAssertFalse(out.contains("<span style="), "小图标不应被包装层包裹导致排版错乱")
+        XCTAssertEqual(out, html, "小图标应当原样保留")
+    }
+
+    func testTranslatableImageHasResponsiveWrapper() {
+        let html = #"<p>\#(img())</p>"#
+        let out = ImageTranslationOverlay.inject(into: html, badges: [cid: .translate])
+
+        XCTAssertTrue(out.contains("display:inline-block!important;"), "包装层必须为 inline-block")
+        XCTAssertTrue(out.contains("max-width:100%!important;"), "包装层必须具备 max-width:100% 响应式自适应且不撑破外层 table")
+    }
+
+    func testIsLikelyTranslatableFiltersSmallDimensions() {
+        XCTAssertFalse(ImageTranslationOverlay.isLikelyTranslatable(width: 20, height: 20))
+        XCTAssertFalse(ImageTranslationOverlay.isLikelyTranslatable(width: 40, height: 40))
+        XCTAssertFalse(ImageTranslationOverlay.isLikelyTranslatable(width: 100, height: 10))
+        XCTAssertFalse(ImageTranslationOverlay.isLikelyTranslatable(width: 202, height: 73), "签名 Logo（如 202x73）不应被作为可翻译图片注入角标")
+        XCTAssertTrue(ImageTranslationOverlay.isLikelyTranslatable(width: 180, height: 120))
+        XCTAssertTrue(ImageTranslationOverlay.isLikelyTranslatable(width: 800, height: 1200))
+    }
+
     // MARK: - 动作 URL 解析
 
     func testActionIDRoundTripWithSpecialCharacters() {

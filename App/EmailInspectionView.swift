@@ -524,6 +524,8 @@ struct EmailInspectionView: View {
         for (cid, resource) in inspection.decoded.inlineResources {
             let mime = resource.mimeType.lowercased()
             guard mime.hasPrefix("image/"), !mime.contains("gif") else { continue }
+            // 过滤小图标（如社媒图标、间距点、追踪像素等），避免破坏行内排版与落款区域
+            guard ImageTranslationOverlay.isTranslatableImage(data: resource.data) else { continue }
             badges[cid] = .translate
         }
         if allowsRemoteContent {

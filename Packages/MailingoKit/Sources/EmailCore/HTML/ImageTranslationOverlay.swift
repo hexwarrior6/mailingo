@@ -1,4 +1,6 @@
+import CoreGraphics
 import Foundation
+import ImageIO
 
 /// 给邮件里的图片注入"图片翻译"角标（图左上角的小按钮）。
 ///
@@ -145,7 +147,53 @@ public enum ImageTranslationOverlay {
         return "\(outputScheme)://\(encoded)"
     }
 
+    /// 校验图片字节是否满足可翻译尺寸（排除小图标、社媒图标、间距点等，宽>=48且高>=32）。
+    public static func isTranslatableImage(data: Data) -> Bool {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
+            return false
+        }
+        let width = properties[kCGImagePropertyPixelWidth] as? Int ?? 0
+        let height = properties[kCGImagePropertyPixelHeight] as? Int ?? 0
+        return isLikelyTranslatable(width: width, height: height)
+    }
+
+    /// 判断指定的宽高是否是值得翻译的图片（过滤小于 64x48 的小图标、单像素占位图、以及签名落款徽标）。
+    public static func isLikelyTranslatable(width: Int, height: Int) -> Bool {
+        // 排除小图标或单像素占位图
+        guard width >= 64, height >= 48 else { return false }
+        // 排除狭长标题条或签名落款徽标（宽高比过大且高度较小的图片，例如 202x73 或 753x50）
+        let ratio = Double(width) / Double(height)
+        if ratio > 2.5 && height < 100 {
+            return false
+        }
+        return true
+    }
+
     // MARK: - 私有
+
+    /// 检查 HTML 标签中的 width/height 属性是否显式声明为小图标（< 48x32）。
+    private static func isSmallIcon(imgTag: String) -> Bool {
+        if let w = attributeValue(named: "width", in: imgTag).flatMap(Int.init), w < 48 {
+            return true
+        }
+        if let h = attributeValue(named: "height", in: imgTag).flatMap(Int.init), h < 32 {
+            return true
+        }
+        return false
+    }
+
+    private static func attributeValue(named name: String, in tag: String) -> String? {
+        let pattern = #"(?is)\b\#(name)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        guard let match = regex.firstMatch(in: tag, range: NSRange(tag.startIndex..., in: tag)) else { return nil }
+        for group in 1..<match.numberOfRanges {
+            if let range = Range(match.range(at: group), in: tag) {
+                return String(tag[range]).trimmingCharacters(in: CharacterSet(charactersIn: "pxPX \t\r\n"))
+            }
+        }
+        return nil
+    }
 
     /// 从 img 标签里提取 src 的值（兼容双引号 / 单引号 / 无引号）。
     private static func srcValue(in imgTag: String) -> String? {
@@ -183,6 +231,7 @@ public enum ImageTranslationOverlay {
            let imgRange = Range(match.range(at: 2), in: html) {
             let anchorWithImg = String(html[anchorRange])
             let imgTag = String(html[imgRange])
+            if isSmallIcon(imgTag: imgTag) { return anchorWithImg }
             guard let srcValue = srcValue(in: imgTag),
                   let key = badgeKey(forSrcValue: srcValue),
                   let badge = badges[key] ?? badges[srcValue] else { return anchorWithImg }
@@ -210,6 +259,7 @@ public enum ImageTranslationOverlay {
             let button = badgeAnchor(key: key, badge: badge)
             // 角标是锚点的**兄弟**（不是嵌进锚点里），装饰层包住两者。
             // 纯图超链接加 line-height:0 消除基线缝隙；若超链接内带有文字，保留正常行高避免文字挤压。
+            // 声明 max-width:100% 确保包裹层随容器自适应，不撑破外层 table。
             let style = hasVisibleText(in: anchorWithImg, excluding: imgTag)
                 ? "position:relative!important;display:inline-block!important;max-width:100%!important;box-sizing:border-box!important;"
                 : wrapperStyle
@@ -221,6 +271,7 @@ public enum ImageTranslationOverlay {
             return String(html[fullRange])
         }
         let imgTag = String(html[imgRange])
+        if isSmallIcon(imgTag: imgTag) { return imgTag }
         guard let srcValue = srcValue(in: imgTag),
               let key = badgeKey(forSrcValue: srcValue),
               let badge = badges[key] ?? badges[srcValue] else { return imgTag }
@@ -264,8 +315,9 @@ public enum ImageTranslationOverlay {
 
     /// 装饰层样式。`!important` 是必须的 —— 邮件自带的 CSS 会覆盖
     /// 注入元素的普通内联样式（reset 样式很常见）。
+    /// 声明 max-width:100% 确保包裹层随容器自适应，不撑破外层 table。
     private static let wrapperStyle =
-        "position:relative!important;display:inline-block!important;line-height:0!important;max-width:100%!important;box-sizing:border-box!important;"
+        "position:relative!important;display:inline-block!important;max-width:100%!important;line-height:0!important;box-sizing:border-box!important;"
 
     private static func badgeAnchor(key: String, badge: Badge) -> String {
         // 正圆（24×24、border-radius 50%）：文字紧凑、去内边距与字距

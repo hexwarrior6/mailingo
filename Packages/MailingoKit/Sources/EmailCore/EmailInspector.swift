@@ -47,13 +47,22 @@ public enum EmailInspector {
         try Task.checkCancellation()
         let decoded = try decoder.decode(rawMessage)
 
-        let (html, usedFallback): (String, Bool)
+        var (html, usedFallback): (String, Bool)
         if let htmlBody = decoded.html, !htmlBody.isEmpty {
             (html, usedFallback) = (htmlBody, false)
         } else if let plain = decoded.plainText, !plain.isEmpty {
             (html, usedFallback) = (plainTextToHTML(plain), true)
         } else {
             (html, usedFallback) = ("", false)
+        }
+
+        // Apple Mail 规范：未在 HTML 正文中内联引用的图片附件，自动在邮件末尾展示
+        let unreferencedImageAttachments = decoded.attachments.filter { attachment in
+            guard attachment.mimeType.lowercased().hasPrefix("image/") else { return false }
+            return !isReferencedInHTML(cid: attachment.contentID, html: html)
+        }
+        if !unreferencedImageAttachments.isEmpty {
+            html = appendAttachedImages(to: html, attachments: unreferencedImageAttachments)
         }
 
         try Task.checkCancellation()
@@ -63,6 +72,51 @@ public enum EmailInspector {
             usedPlainTextFallback: usedFallback,
             segments: try SegmentExtractor.extract(from: html)
         )
+    }
+
+    /// 检查指定 Content-ID 是否已经在 HTML 正文中被 `cid:` 引用。
+    static func isReferencedInHTML(cid: String, html: String) -> Bool {
+        guard !cid.isEmpty, !html.isEmpty else { return false }
+        if html.localizedCaseInsensitiveContains("cid:\(cid)") { return true }
+        if html.localizedCaseInsensitiveContains(cid) { return true }
+        if let encoded = cid.addingPercentEncoding(withAllowedCharacters: CIDReferenceRewriter.unreservedCharacters),
+           html.localizedCaseInsensitiveContains(encoded) {
+            return true
+        }
+        return false
+    }
+
+    /// 将图片附件附加到邮件 HTML 末尾。
+    static func appendAttachedImages(to html: String, attachments: [EmailAttachment]) -> String {
+        guard !attachments.isEmpty else { return html }
+
+        var itemsHTML = ""
+        for att in attachments {
+            let altText = att.filename.map { HTMLEntities.escapeText($0) } ?? "Attached Image"
+            itemsHTML += """
+            <div class="mailingo-attachment-item" style="margin: 20px 0; text-align: center;">
+                <img src="cid:\(att.contentID)" alt="\(altText)" style="max-width: 100% !important; height: auto !important; display: block; margin: 0 auto; border-radius: 4px;" />
+            </div>
+            """
+        }
+
+        let containerHTML = """
+        <div class="mailingo-attachments" style="margin-top: 32px; padding-top: 16px; border-top: 1px solid rgba(128,128,128,0.25); clear: both;">
+        \(itemsHTML)
+        </div>
+        """
+
+        if let bodyClose = html.range(of: "</body>", options: .caseInsensitive) {
+            var out = html
+            out.insert(contentsOf: "\n" + containerHTML + "\n", at: bodyClose.lowerBound)
+            return out
+        } else if let htmlClose = html.range(of: "</html>", options: .caseInsensitive) {
+            var out = html
+            out.insert(contentsOf: "\n" + containerHTML + "\n", at: htmlClose.lowerBound)
+            return out
+        } else {
+            return html + "\n" + containerHTML
+        }
     }
 
     /// 把译文写回，并做保真自检。

@@ -10,6 +10,8 @@ public struct DecodedEmail: Sendable {
     public var plainText: String?
     /// 内联资源（`Content-ID` → 字节），用于渲染 `cid:` 图片。
     public var inlineResources: [String: InlineResource]
+    /// 邮件附件（包含在邮件末尾展示的图片等）。
+    public var attachments: [EmailAttachment]
     /// MIME 结构的文字描述，用于在 UI 里展示"这封信长什么样"。
     public var structureSummary: [String]
 
@@ -17,12 +19,29 @@ public struct DecodedEmail: Sendable {
         html: String? = nil,
         plainText: String? = nil,
         inlineResources: [String: InlineResource] = [:],
+        attachments: [EmailAttachment] = [],
         structureSummary: [String] = []
     ) {
         self.html = html
         self.plainText = plainText
         self.inlineResources = inlineResources
+        self.attachments = attachments
         self.structureSummary = structureSummary
+    }
+}
+
+/// 邮件附件。
+public struct EmailAttachment: Sendable, Equatable {
+    public var contentID: String
+    public var filename: String?
+    public var mimeType: String
+    public var data: Data
+
+    public init(contentID: String, filename: String? = nil, mimeType: String, data: Data) {
+        self.contentID = contentID
+        self.filename = filename
+        self.mimeType = mimeType
+        self.data = data
     }
 }
 

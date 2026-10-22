@@ -211,6 +211,58 @@ final class HTMLPipelineTests: XCTestCase {
         XCTAssertTrue(inspection.splicedHTML.contains("track.example.com/open.gif"))
     }
 
+    // MARK: - 附件图片在末尾展示（对齐 Apple Mail 行为）
+
+    func testAttachedImageIsAppendedAtEndOfHTML() throws {
+        let raw = Data("""
+        Content-Type: multipart/mixed; boundary="bound-mix"\r
+        \r
+        --bound-mix\r
+        Content-Type: text/html; charset="utf-8"\r
+        \r
+        <html><body><p>Hello world</p></body></html>\r
+        --bound-mix\r
+        Content-Type: image/jpeg; name="poster.jpg"\r
+        Content-Disposition: attachment; filename="poster.jpg"\r
+        Content-Transfer-Encoding: base64\r
+        \r
+        /9j/4AAQSkZJRg==\r
+        --bound-mix--\r
+        """.utf8)
+
+        let analysis = try EmailInspector.analyze(rawMessage: raw)
+        XCTAssertTrue(analysis.originalHTML.contains("class=\"mailingo-attachments\""))
+        XCTAssertTrue(analysis.originalHTML.contains("src=\"cid:attachment-1@mailingo\""))
+        XCTAssertTrue(analysis.originalHTML.contains("alt=\"poster.jpg\""))
+
+        // 切片及保真验证也应 100% 通过
+        let inspection = try EmailInspector.apply(translations: markerTranslations(for: analysis), to: analysis)
+        XCTAssertTrue(inspection.fidelity.nonTextBytesIdentical)
+        XCTAssertTrue(inspection.fidelity.tagSequenceIdentical)
+        XCTAssertTrue(inspection.splicedHTML.contains("src=\"cid:attachment-1@mailingo\""))
+    }
+
+    func testAlreadyReferencedInlineImageIsNotDuplicatedAtEnd() throws {
+        let raw = Data("""
+        Content-Type: multipart/related; boundary="bound-rel"\r
+        \r
+        --bound-rel\r
+        Content-Type: text/html; charset="utf-8"\r
+        \r
+        <html><body><p>Logo here: <img src="cid:my-logo@ntu"></p></body></html>\r
+        --bound-rel\r
+        Content-Type: image/png\r
+        Content-ID: <my-logo@ntu>\r
+        Content-Transfer-Encoding: base64\r
+        \r
+        iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=\r
+        --bound-rel--\r
+        """.utf8)
+
+        let analysis = try EmailInspector.analyze(rawMessage: raw)
+        XCTAssertFalse(analysis.originalHTML.contains("class=\"mailingo-attachments\""), "已在正文中引用的内联图不应在末尾重复出现")
+    }
+
     // MARK: - 辅助
 
     // MARK: - 保真自检的"只分词一趟"优化

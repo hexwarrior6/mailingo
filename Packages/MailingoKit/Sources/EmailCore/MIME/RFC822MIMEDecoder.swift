@@ -32,6 +32,7 @@ public struct RFC822MIMEDecoder: MIMEDecoding {
             html: accumulator.html,
             plainText: accumulator.plainText,
             inlineResources: accumulator.inlineResources,
+            attachments: accumulator.attachments,
             structureSummary: accumulator.structureSummary
         )
     }
@@ -42,6 +43,7 @@ public struct RFC822MIMEDecoder: MIMEDecoding {
         var html: String?
         var plainText: String?
         var inlineResources: [String: InlineResource] = [:]
+        var attachments: [EmailAttachment] = []
         var structureSummary: [String] = []
     }
 
@@ -51,12 +53,17 @@ public struct RFC822MIMEDecoder: MIMEDecoding {
         var body: [UInt8]
 
         var contentType: (type: String, params: [String: String]) {
-            Self.parseContentType(headers["content-type"] ?? "text/plain; charset=us-ascii")
+            Self.parseParameterizedHeader(headers["content-type"] ?? "text/plain; charset=us-ascii")
         }
 
-        static func parseContentType(_ raw: String) -> (type: String, params: [String: String]) {
+        var contentDisposition: (type: String, params: [String: String])? {
+            guard let raw = headers["content-disposition"] else { return nil }
+            return Self.parseParameterizedHeader(raw)
+        }
+
+        static func parseParameterizedHeader(_ raw: String) -> (type: String, params: [String: String]) {
             let pieces = raw.split(separator: ";", omittingEmptySubsequences: false)
-            let type = pieces.first.map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? "text/plain"
+            let type = pieces.first.map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? ""
 
             var params: [String: String] = [:]
             for piece in pieces.dropFirst() {
@@ -93,17 +100,44 @@ public struct RFC822MIMEDecoder: MIMEDecoding {
         }
 
         let decoded = decodeTransferEncoding(part.body, encoding: part.headers["content-transfer-encoding"])
+        let cd = part.contentDisposition
+        let filename = cd?.params["filename"] ?? ct.params["name"]
 
-        // 内联资源（cid: 引用的图片）
+        var explicitCID: String?
         if let rawCID = part.headers["content-id"] {
             let cid = rawCID.trimmingCharacters(in: CharacterSet(charactersIn: "<> \t"))
             if !cid.isEmpty {
-                accumulator.inlineResources[cid] = InlineResource(
-                    contentID: cid,
-                    mimeType: ct.type,
-                    data: Data(decoded)
-                )
+                explicitCID = cid
             }
+        }
+
+        if ct.type.lowercased().hasPrefix("image/") {
+            let effectiveCID = explicitCID ?? "attachment-\(accumulator.inlineResources.count + 1)@mailingo"
+            accumulator.inlineResources[effectiveCID] = InlineResource(
+                contentID: effectiveCID,
+                mimeType: ct.type,
+                data: Data(decoded)
+            )
+            accumulator.attachments.append(EmailAttachment(
+                contentID: effectiveCID,
+                filename: filename,
+                mimeType: ct.type,
+                data: Data(decoded)
+            ))
+        } else if let cid = explicitCID {
+            accumulator.inlineResources[cid] = InlineResource(
+                contentID: cid,
+                mimeType: ct.type,
+                data: Data(decoded)
+            )
+        } else if let cd = cd, cd.type == "attachment" || filename != nil {
+            let effectiveCID = "attachment-\(accumulator.attachments.count + 1)@mailingo"
+            accumulator.attachments.append(EmailAttachment(
+                contentID: effectiveCID,
+                filename: filename,
+                mimeType: ct.type,
+                data: Data(decoded)
+            ))
         }
 
         switch ct.type {
