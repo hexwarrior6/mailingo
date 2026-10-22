@@ -46,7 +46,38 @@
 
 ---
 
-## 🚀 快速上手
+## 📥 安装与使用
+
+### 下载安装包
+
+从以下渠道直接下载最新版本 `Mailingo.dmg`：
+- **[官方网站](https://hexwarrior6.github.io/mailingo/)**
+- **[GitHub Releases 发行版](https://github.com/hexwarrior6/mailingo/releases)**
+
+1. 双击打开 `Mailingo.dmg`，将 **Mailingo.app** 拖入「应用程序（Applications）」文件夹。
+2. 在「应用程序」中启动一次 Mailingo，以向系统注册 MailKit 邮件扩展。
+
+> [!TIP]
+> **初次打开提示未签名 / 损坏？**  
+> Mailingo 为个人开源项目，未购买苹果年费开发者证书。若初次打开时 macOS 弹出安全拦截提示，只需打开终端（Terminal）执行以下命令移除隔离属性即可正常运行：
+> ```bash
+> xattr -cr /Applications/Mailingo.app
+> ```
+
+---
+
+## ⚙️ 在 Apple Mail 中启用
+
+1. **完全退出 Apple Mail**（按 `⌘Q`，非单纯关闭窗口；Mail 仅在冷启动时扫描并加载新扩展）。
+2. 重新打开 Apple Mail → **设置** (`⌘,`) → **扩展** 页签。
+3. 勾选 **Mailingo** 扩展。
+4. 打开任意邮件，阅读窗格上方即会出现 Mailingo 翻译横幅。
+
+---
+
+## 🛠️ 从源码编译（开发者）
+
+如需二次开发或自行本地编译：
 
 ### 环境要求
 
@@ -54,7 +85,7 @@
 - Xcode 16+ (Swift 6.0+)
 - 本地 Apple Development 签名证书（系统加载 Mail 扩展时必需）
 
-### 编译与安装
+### 编译步骤
 
 ```bash
 # 1. 下载工程管理工具 XcodeGen
@@ -63,13 +94,6 @@ make bootstrap
 # 2. 编译、签名并安装至 /Applications 目录
 make install-app
 ```
-
-### 在 Apple Mail 中启用
-
-1. **完全退出 Apple Mail**（按 `⌘Q`，非单纯关闭窗口，Mail 仅在冷启动时扫描扩展）。
-2. 重新打开 Apple Mail → **设置** (`⌘,`) → **扩展** 页签。
-3. 勾选 **Mailingo** 扩展。
-4. 打开任意邮件，阅读窗格上方即会出现 Mailingo 翻译横幅。
 
 ---
 

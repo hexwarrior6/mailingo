@@ -46,30 +46,54 @@ When you receive an email in a foreign language, clicking the translation banner
 
 ---
 
-## 🚀 Quick Start
+## 📥 Installation
 
-### Prerequisites
+### Download Mailingo
+
+Download the latest `.dmg` installer directly from:
+- **[Official Website](https://hexwarrior6.github.io/mailingo/)**
+- **[GitHub Releases](https://github.com/hexwarrior6/mailingo/releases)**
+
+1. Open `Mailingo.dmg` and drag **Mailingo.app** into your `/Applications` folder.
+2. Launch Mailingo once from `/Applications` to register the MailKit extension with macOS.
+
+> [!TIP]
+> **First-Launch Gatekeeper Notice**  
+> Since Mailingo is an independent open-source project without a paid Apple Developer certificate, macOS Gatekeeper may show a security prompt on first launch. If prompted, run this command in Terminal to clear the quarantine flag:
+> ```bash
+> xattr -cr /Applications/Mailingo.app
+> ```
+
+---
+
+## ⚙️ Enable in Apple Mail
+
+1. **Quit Apple Mail completely** (`⌘Q`, not just closing the window — Mail only discovers new extensions on cold launch).
+2. Re-open Apple Mail → **Settings** (`⌘,`) → **Extensions** tab.
+3. Check the checkbox next to **Mailingo**.
+4. Open any email — the Mailingo translation banner will appear at the top of the message pane.
+
+---
+
+## 🛠️ Building from Source (Developers)
+
+If you want to contribute or build Mailingo locally:
+
+### Requirements
 
 - macOS 15.0+ (Sequoia)
 - Xcode 16+ (Swift 6.0+)
-- An Apple Development signing certificate (required for loading Mail Extensions locally)
+- Local Apple Development certificate (for codesigning Mail extensions locally)
 
-### Build & Install
+### Build Steps
 
 ```bash
 # 1. Download build tooling (XcodeGen)
 make bootstrap
 
-# 2. Build, sign, and install to /Applications
+# 2. Build, codesign, and install to /Applications
 make install-app
 ```
-
-### Enable in Apple Mail
-
-1. **Quit Apple Mail completely** (`⌘Q`, not just closing windows).
-2. Re-open Apple Mail → **Settings** (`⌘,`) → **Extensions** tab.
-3. Check the checkbox next to **Mailingo**.
-4. Open any email — you will see the Mailingo action banner at the top of the message pane.
 
 ---
 
