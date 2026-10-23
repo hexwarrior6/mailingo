@@ -82,6 +82,20 @@ jobs:
           prerelease: false
           generate_release_notes: true
           body: |
+            ## What's Changed in ${{ steps.meta.outputs.tag }}
+
+            ### 🐛 Bug Fixes & Layout Improvements
+            - **Responsive Text Wrapping**: Fixed body text and marketing email cards getting cut off at the right edge in narrow viewports.
+            - **Signature & Logo Protection**: Protected signature logo columns from excessive shrinkage and kept multi-icon rows neatly aligned.
+            - **Eliminated Text Overlap**: Fixed social media icons overlapping with adjacent handle text (e.g. `@caontusg`).
+            - **Float Clearing for Disclaimers**: Fixed post-signature confidentiality notices and legal disclaimers wrapping awkwardly to the right of shrunk signature tables.
+            - **Overlay Filtering**: Excluded signature logos and narrow decorative bars from getting intrusive translation badges.
+
+            ### 🚀 New Features
+            - **Attachment Images Display**: Standalone attached images without inline CID now render cleanly at the end of the email body matching Apple Mail behavior.
+
+            ---
+
             ## Installation
 
             1. Download [`Mailingo.dmg`](https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.tag }}/Mailingo.dmg) and drag `Mailingo.app` into `/Applications`.
