@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.2] - 2026-10-28
 
 ### Fixed / 修复
+- **App version metadata / 应用版本信息**: The app and Mail extension now use the release version and build number instead of XcodeGen's default metadata.
 - **Consistent newsletter columns / Newsletter 图片列对齐**: Preserve image-column proportions across separate event tables, keeping posters equally wide and text consistently aligned.
 - **Registration ticket layouts / 报名票据排版**: Retain original container widths, paired tables and mobile layouts so QR codes, logos and wallet buttons keep their intended sizes.
 - **Narrow-window readability / 窄窗口阅读**: Wrap long text without clipping and allow multi-column footers to accommodate fixed-size social icons.

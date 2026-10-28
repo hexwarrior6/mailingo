@@ -57,6 +57,13 @@ jobs:
             DEVELOPMENT_TEAM="" \
             build
 
+      - name: 校验应用与扩展的实际版本
+        env:
+          RELEASE_TAG: ${{ inputs.tag_name || github.ref_name }}
+        run: |
+          python3 Scripts/release-notes.py "$RELEASE_TAG" .build/release-notes.md \
+            --app .build/DerivedData/Build/Products/Release/Mailingo.app
+
       - name: 打包 DMG 与 ZIP
         run: |
           bash Scripts/package-dmg.sh "${{ github.workspace }}/.build/DerivedData/Build/Products/Release/Mailingo.app" "${{ github.workspace }}/.build/dist"

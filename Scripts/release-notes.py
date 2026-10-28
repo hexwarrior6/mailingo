@@ -3,6 +3,7 @@
 import argparse
 from pathlib import Path
 import re
+import plistlib
 
 
 def main():
@@ -11,6 +12,7 @@ def main():
     parser.add_argument("output", type=Path)
     parser.add_argument("--repo", default="hexwarrior6/mailingo")
     parser.add_argument("--checksums", type=Path)
+    parser.add_argument("--app", type=Path, help="Validate built app and extension versions")
     args = parser.parse_args()
     if not re.fullmatch(r"v\d+\.\d+\.\d+", args.tag):
         parser.error("expected a stable version tag such as v0.1.2")
@@ -23,6 +25,13 @@ def main():
     app_version = re.search(r'^\s*MARKETING_VERSION:\s*"([^\"]+)"', project, re.M)
     if not app_version or app_version[1] != version:
         parser.error("release tag must match MARKETING_VERSION in project.yml")
+    if args.app:
+        build = re.search(r'^\s*CURRENT_PROJECT_VERSION:\s*"([^\"]+)"', project, re.M)
+        for relative in ["Contents/Info.plist", "Contents/PlugIns/MailingoMailExtension.appex/Contents/Info.plist"]:
+            with (args.app / relative).open("rb") as file:
+                info = plistlib.load(file)
+            if info.get("CFBundleShortVersionString") != version or not build or info.get("CFBundleVersion") != build[1]:
+                parser.error(f"built version mismatch: {relative}")
 
     changelog = (root / "CHANGELOG.md").read_text()
     entries = list(re.finditer(

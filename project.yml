@@ -134,6 +134,8 @@ targets:
         CFBundleName: Mailingo
         CFBundleDisplayName: Mailingo
         CFBundlePackageType: APPL
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSMinimumSystemVersion: "15.0"
         LSApplicationCategoryType: public.app-category.productivity
         # 刻意**不加** LSUIElement：Dock 图标与菜单栏都保留。
@@ -186,6 +188,8 @@ targets:
         CFBundleName: MailingoMailExtension
         CFBundleDisplayName: Mailingo
         CFBundlePackageType: XPC!
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.email.extension
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).MailingoMailExtension
