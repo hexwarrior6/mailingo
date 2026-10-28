@@ -14,6 +14,7 @@ SPMDIR   := $(CURDIR)/.build/spm
 .PHONY: help bootstrap gen build test check-render check-reply-quotes check-message-store run register status log stream diagnose clean reset-log install-app verify-appex refresh-plugins appicon appicon-project dmg
 
 help:
+	@echo "make check-responsive-layout 验证 newsletter 等宽列、票据双列与窄窗适配（真实 WebKit）"
 	@echo "make check-message-store 验证多版本邮件与旧翻译横幅的定位和清理"
 	@echo "make check-reply-quotes  验证引用折叠、展开和重载状态（真实 WebKit）"
 	@echo "make bootstrap  下载 XcodeGen 到 .tools/（无需 sudo，固定版本；克隆后先跑这个）"
@@ -90,6 +91,15 @@ check-render:
 	  -sdk "$$(xcrun --show-sdk-path --sdk macosx)" \
 	  Scripts/render-check.swift "$(CURDIR)/.build/render-check.png"
 	@open "$(CURDIR)/.build/render-check.png" 2>/dev/null || true
+
+.PHONY: check-responsive-layout
+check-responsive-layout:
+	@mkdir -p "$(CURDIR)/.build/swiftcache"
+	swiftc -module-cache-path "$(CURDIR)/.build/swiftcache" \
+	  $$(find Packages/MailingoKit/Sources/EmailCore -name '*.swift') \
+	  Scripts/check-responsive-layout.swift -o "$(CURDIR)/.build/check-responsive-layout"
+	"$(CURDIR)/.build/check-responsive-layout"
+	"$(CURDIR)/.build/check-responsive-layout" Packages/MailingoKit/Tests/EmailCoreTests/Fixtures/layout-ticket.html
 
 # 生成 App 图标。
 #

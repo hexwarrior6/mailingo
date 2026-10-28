@@ -2,25 +2,10 @@ import Foundation
 
 /// 为邮件 HTML 注入响应式排版样式，解决窄屏/半屏宽度下的水平滚动与图片截断问题。
 ///
-/// ## 背景与机制
-///
-/// 传统排版与营销邮件大多基于桌面端固定宽度（常见 600px–800px）设计，使用固定宽度的 `<table>`
-/// 或固定宽度 `<img>`。在分栏双语对比视图或分屏宽度下（约 350px–450px），
-/// 固定宽度会导致：
-/// 1. 出现全局水平滚动条，内容被裁切；
-/// 2. 大图只显示一半，影响阅读体验。
-///
-/// ## 表格与正文排版机制
-///
-/// 传统排版与营销邮件大多基于固定宽度（常见 600px–800px）设计。在分栏双语对比视图或分屏宽度下（约 350px–450px）：
-/// 1. 若仅对 `table` 应用 `max-width: 100%`，WebKit 的表格自动布局算法在遇到具有固定属性（如 `<td width="753">`
-///    或 `<table style="max-width: 480pt">`）时，不会自动缩小外层容器，导致邮件正文长段落按 700px+ 宽度排版，
-///    文字被右边缘硬性裁切截断。
-/// 2. 为此，必须对声明了固定宽度或最大宽度的容器表格施加 `width: 100% !important; max-width: 100% !important;`，
-///    确保邮件正文与卡片自适应窗口宽度，段落自然折行。
-/// 3. 与此同时，邮件落款与签名常采用多列横向 `<table>`（例如左列放置组织 Logo，右列放置文字及社媒图标）。
-///    当表格在窄屏收缩时，为防止 WebKit 将图片列过度压缩至仅剩数十像素，需通过 `:has()` 规则为带有非微缩图标
-///    的图片列保留合理的 `min-width: 120px`，确保落款 Logo 清晰保真，社媒图标水平排布不折行。
+/// 保留发件人的容器最大宽度、列宽比例、并列布局和媒体查询。
+/// 固定宽度表格改用 min(100%, 原宽度)，只在空间不足时收缩；
+/// 完整声明了列宽的单行表格按原比例收缩，不让每个活动独立争抢宽度。
+/// 不再全局清除单元格宽度或把所有容器拉伸到窗口宽度。
 ///
 /// ## 只作用于渲染副本
 ///
@@ -49,34 +34,17 @@ public enum EmailResponsiveLayout {
         overflow-y: visible !important;
         -webkit-text-size-adjust: 100% !important;
         word-wrap: break-word !important;
+        overflow-wrap: anywhere !important;
     }
     table {
         max-width: 100% !important;
     }
-    /* 取消表格默认浮动：Outlook 签名常带 align="left" (对应 float:left)，在响应式收缩后会导致后续保密声明横向环绕爬上右侧 */
-    table[align="left"], table[align="right"] {
+    /* 独立签名表不应让后文环绕；同一单元格中的并列布局表保留原有浮动。 */
+    table[align="left"]:not(td table), table[align="right"]:not(td table),
+    td > table[align="left"]:only-of-type, td > table[align="right"]:only-of-type {
         float: none !important;
     }
-    table[width]:not([width$="%"]),
-    table[style*="width"]:not([style*="%"]),
-    table[style*="max-width"] {
-        width: auto !important;
-        max-width: 100% !important;
-    }
-    body > table,
-    body > div > table,
-    div.WordSection1 > table,
-    div.WordSection1 > div > table,
-    div[align="center"] > table[style*="width"],
-    div[align="center"] > table[style*="max-width"] {
-        width: 100% !important;
-    }
     td, th {
-        max-width: 100% !important;
-    }
-    td[width]:not([width$="%"]),
-    td[style*="width"]:not([style*="%"]) {
-        width: auto !important;
         max-width: 100% !important;
     }
     /* 落款签名区域保护：右边框分隔线所在图片列保持合适宽度 */
@@ -148,6 +116,7 @@ public enum EmailResponsiveLayout {
     /// 5. 否则作为前缀拼接到 HTML 最前面。
     public static func inject(into html: String) -> String {
         guard !html.contains("id=\"\(styleID)\"") else { return html }
+        let html = EmailTableColumnLayout.preservingColumnRatios(in: html)
 
         // 1. </head> 之前
         if let headCloseRange = html.range(of: "</head>", options: .caseInsensitive) {

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed / 修复
+- Preserve newsletter image-column proportions across separate event tables instead of sizing each row from its text content.
+- Retain authored container widths, paired floating tables and responsive media queries, including registration tickets with QR codes and wallet buttons.
+- Allow long text to wrap in narrow windows and let multi-column footers accommodate fixed-size social icons.
+
 ## [0.1.1] - 2026-10-23
 
 ### Fixed / 修复
