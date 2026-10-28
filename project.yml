@@ -10,8 +10,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.1.1"
-    CURRENT_PROJECT_VERSION: "2"
+    MARKETING_VERSION: "0.1.2"
+    CURRENT_PROJECT_VERSION: "3"
     DEVELOPMENT_TEAM: 75Q23985G5
 
     # S0 探针阶段：手动签名（离线可用，不需要 provisioning profile，

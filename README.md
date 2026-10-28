@@ -97,6 +97,20 @@ make install-app
 
 ---
 
+### Publishing a Release
+
+1. Add user-facing changes to `CHANGELOG.md` under `Unreleased` while developing.
+2. Before release, move those changes into a dated version section (for example, `## [0.1.2] - 2026-10-28`), update `MARKETING_VERSION` and increment `CURRENT_PROJECT_VERSION` in `project.yml`.
+3. Commit and push the changes, then create and push the matching tag, for example `v0.1.2`.
+
+The Release Build workflow validates the version and changelog, runs tests, builds the app, and publishes the DMG, ZIP and SHA-256 checksums. Release notes come from that version's changelog entry. For a manual rerun, select the existing release tag in the workflow input.
+
+To preview the notes locally:
+
+```bash
+python3 Scripts/release-notes.py v0.1.2 .build/release-notes.md
+```
+
 ## 🛠️ Project Structure
 
 ```text

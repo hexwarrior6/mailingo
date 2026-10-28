@@ -7,10 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-28
+
 ### Fixed / 修复
-- Preserve newsletter image-column proportions across separate event tables instead of sizing each row from its text content.
-- Retain authored container widths, paired floating tables and responsive media queries, including registration tickets with QR codes and wallet buttons.
-- Allow long text to wrap in narrow windows and let multi-column footers accommodate fixed-size social icons.
+- **Consistent newsletter columns / Newsletter 图片列对齐**: Preserve image-column proportions across separate event tables, keeping posters equally wide and text consistently aligned.
+- **Registration ticket layouts / 报名票据排版**: Retain original container widths, paired tables and mobile layouts so QR codes, logos and wallet buttons keep their intended sizes.
+- **Narrow-window readability / 窄窗口阅读**: Wrap long text without clipping and allow multi-column footers to accommodate fixed-size social icons.
+
+### Changed / 调整
+- **Version-specific release notes / 按版本生成发布说明**: GitHub Releases now use the matching section of this changelog. Publishing stops if the tag, app version or changelog entry does not match.
 
 ## [0.1.1] - 2026-10-23
 
