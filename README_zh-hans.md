@@ -99,6 +99,8 @@ make install-app
 
 ### 发布新版本
 
+`CHANGELOG.md` 和 GitHub Release 说明统一使用英文；生成器沿用既有的发布小节和安装说明格式。
+
 1. 开发期间，将面向用户的变更写入 `CHANGELOG.md` 的 `Unreleased` 部分。
 2. 发布前，将这些变更移到带日期的版本小节（如 `## [0.1.2] - 2026-10-28`），更新 `project.yml` 中的 `MARKETING_VERSION`，并递增 `CURRENT_PROJECT_VERSION`。
 3. 提交并推送代码，然后创建和推送对应标签（如 `v0.1.2`）。

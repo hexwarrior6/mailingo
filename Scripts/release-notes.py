@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build version-specific GitHub Release notes from CHANGELOG.md (stdlib only)."""
+"""Build English release notes in the established GitHub Release format."""
 import argparse
 from pathlib import Path
 import re
@@ -43,25 +43,41 @@ def main():
     body = re.split(r"^## ", remaining, maxsplit=1, flags=re.M)[0].strip()
     if not re.search(r"^- \S", body, re.M):
         parser.error(f"changelog entry for {version} has no changes")
+    headings = {
+        "Fixed": "🐛 Bug Fixes & Layout Improvements",
+        "Added": "🚀 New Features",
+        "Changed": "🛠️ Improvements",
+    }
+    body = re.sub(r"^### (Fixed|Added|Changed)$", lambda match: "### " + headings[match[1]], body, flags=re.M)
 
     download = f"https://github.com/{args.repo}/releases/download/{args.tag}/Mailingo.dmg"
     notes = f"""## What's Changed in {args.tag}
 
 {body}
 
-## Installation / 安装
+---
 
-1. Download [Mailingo.dmg]({download}) and drag `Mailingo.app` into `/Applications`.
-2. If macOS blocks the self-signed app, clear its quarantine attribute:
+## Installation
+
+1. Download [`Mailingo.dmg`]({download}) and drag `Mailingo.app` into `/Applications`.
+2. Clear the Gatekeeper quarantine attribute for the self-signed binary:
    ```bash
    xattr -cr /Applications/Mailingo.app
    ```
-3. Quit and reopen Mailingo and Apple Mail. Enable **Mailingo** in Apple Mail → **Settings → Extensions** if needed.
+3. Relaunch Apple Mail, then enable **Mailingo** under **Settings (`⌘,`) → Extensions**.
 
-下载 DMG 并替换「应用程序」中的 Mailingo，然后退出并重新打开 Mailingo 和 Apple Mail。
+### Quick Install via Terminal
+
+You can also run the following one-liner to download, install, and configure permissions automatically:
+```bash
+curl -fsSL https://raw.githubusercontent.com/{args.repo}/main/install.sh | bash
+```
 """
     if args.checksums:
         notes += f"\n## Checksums (SHA-256)\n\n```text\n{args.checksums.read_text().strip()}\n```\n"
+    older_entries = re.findall(r"^## \[(\d+\.\d+\.\d+)\]", remaining, re.M)
+    if older_entries:
+        notes += f"\n**Full Changelog**: https://github.com/{args.repo}/compare/v{older_entries[0]}...{args.tag}\n"
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(notes)
     print(f"Release notes validated for {args.tag}: {args.output}")

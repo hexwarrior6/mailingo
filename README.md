@@ -99,6 +99,8 @@ make install-app
 
 ### Publishing a Release
 
+Keep `CHANGELOG.md` and GitHub Release notes in English. The generator preserves the established release sections and installation instructions.
+
 1. Add user-facing changes to `CHANGELOG.md` under `Unreleased` while developing.
 2. Before release, move those changes into a dated version section (for example, `## [0.1.2] - 2026-10-28`), update `MARKETING_VERSION` and increment `CURRENT_PROJECT_VERSION` in `project.yml`.
 3. Commit and push the changes, then create and push the matching tag, for example `v0.1.2`.
