@@ -56,6 +56,7 @@ struct EmailWebView: NSViewRepresentable {
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = false
 
         context.coordinator.attach(webView)
@@ -73,7 +74,7 @@ struct EmailWebView: NSViewRepresentable {
 
     // MARK: - Coordinator
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKURLSchemeHandler {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKURLSchemeHandler {
 
         private static let imgTrace = Logger(subsystem: "com.zhuyuhao.Mailingo", category: "img")
 
@@ -154,12 +155,7 @@ struct EmailWebView: NSViewRepresentable {
             // 宁可多等一个异步回合，也不能先放请求出去。
             if appliedRemotePolicy == false, !isBlockingInPlace { return }
 
-            let rendered = EmailResponsiveLayout.inject(
-                into: ImageTranslationOverlay.inject(
-                    into: CIDReferenceRewriter.rewrite(currentHTML),
-                    badges: presentation?.badges ?? [:]
-                )
-            )
+            let rendered = prepareRenderedHTML(from: currentHTML)
             guard loadedRenderedHTML != rendered else { return }
 
             // 同一封邮件（源 HTML 未变）的增量重载 → 记住滚动位置，加载完恢复；
@@ -186,16 +182,24 @@ struct EmailWebView: NSViewRepresentable {
             }
         }
 
+        /// 准备要在 WebKit 中渲染的临时 HTML 副本。
+        /// 纯文本链接自动包装为超链接、重写 cid: 资源、注入图片翻译角标、注入响应式排版样式。
+        private func prepareRenderedHTML(from sourceHTML: String) -> String {
+            EmailResponsiveLayout.inject(
+                into: ImageTranslationOverlay.inject(
+                    into: CIDReferenceRewriter.rewrite(
+                        EmailAutolink.linkify(sourceHTML)
+                    ),
+                    badges: presentation?.badges ?? [:]
+                )
+            )
+        }
+
         /// 执行一次渲染副本加载。加载时**重新推导**注入结果 ——
         /// 等待读滚动位置期间状态可能又变了，永远加载最新的一版。
         private func loadRendered(_ rendered: String, scrollTo point: CGPoint?) {
             guard let webView else { return }
-            let rendered = EmailResponsiveLayout.inject(
-                into: ImageTranslationOverlay.inject(
-                    into: CIDReferenceRewriter.rewrite(currentHTML),
-                    badges: presentation?.badges ?? [:]
-                )
-            )
+            let rendered = prepareRenderedHTML(from: currentHTML)
             pendingScroll = point
             loadedRenderedHTML = rendered
             // App-owned scripts run even with email JavaScript disabled. Install
@@ -321,6 +325,20 @@ struct EmailWebView: NSViewRepresentable {
             // 没有需要清理的异步工作
         }
 
+        // MARK: WKUIDelegate —— 处理 target="_blank" 或新窗口链接
+
+        func webView(
+            _ webView: WKWebView,
+            createWebViewWith configuration: WKWebViewConfiguration,
+            for navigationAction: WKNavigationAction,
+            windowFeatures: WKWindowFeatures
+        ) -> WKWebView? {
+            if let url = navigationAction.request.url {
+                NSWorkspace.shared.open(url)
+            }
+            return nil
+        }
+
         // MARK: WKNavigationDelegate
 
         /// 增量重载完成后**恢复滚动位置** —— 新页面先落在顶部，这里把它拽回去。
@@ -392,7 +410,7 @@ struct EmailWebView: NSViewRepresentable {
             decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
         ) {
             // 首次加载（loadHTMLString）没有 navigationType .linkActivated
-            if navigationAction.navigationType == .linkActivated,
+            if (navigationAction.navigationType == .linkActivated || navigationAction.targetFrame == nil),
                let url = navigationAction.request.url {
                 if url.scheme == ImageTranslationOverlay.scheme {
                     decisionHandler(.cancel)
