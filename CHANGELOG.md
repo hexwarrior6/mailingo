@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-30
+
 ### Fixed
 - **Plain-Text URLs and Email Links**: Automatically converted plain-text URLs and email addresses in email bodies into clickable links, matching Apple Mail's data detection behavior without affecting translation cache fidelity.
 - **New-Window Link Navigation**: Added `WKUIDelegate` handling so links targeting `_blank` or external windows reliably open in the default browser.
