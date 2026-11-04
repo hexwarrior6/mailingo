@@ -22,7 +22,7 @@ implementation before editing; preserve unrelated changes.
 
 ## Versioning and Publishing
 
-- Follow the release procedure in `README.md` and `.github/workflows/release.yml`.
+- Follow the release procedure in `CONTRIBUTING.md` and `.github/workflows/release.yml`.
   Keep the tag, `MARKETING_VERSION`, changelog version, and actual app and extension
   versions consistent; increment `CURRENT_PROJECT_VERSION` for a new build.
 - Both generated Info.plist files must use `$(MARKETING_VERSION)` and

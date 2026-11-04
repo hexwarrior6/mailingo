@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Local Installation**: Verify the freshly built app before copying it into Applications and register the installed Mail extension.
+
 ## [0.1.3] - 2026-10-30
 
 ### Fixed

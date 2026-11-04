@@ -1,146 +1,35 @@
-<div align="center"><a name="readme-top"></a>
-
-<img height="120" src="./docs/assets/icon.png" alt="Mailingo Icon">
-
-<h1>Mailingo</h1>
-
-Native macOS email translation companion for Apple Mail — 1:1 layout mirrored translation right by your side.
-
-[![Platform](https://img.shields.io/badge/Platform-macOS%2015.0%2B-blue?logo=apple)](https://www.apple.com/macos/)
-[![Swift](https://img.shields.io/badge/Swift-6.0%2B-F05138?logo=swift)](https://swift.org)
-[![MailKit](https://img.shields.io/badge/Extension-MailKit-5856D6)](https://developer.apple.com/documentation/mailkit)
-[![WebKit](https://img.shields.io/badge/Renderer-WebKit-000000?logo=safari)](https://webkit.org)
-[![Website](https://img.shields.io/badge/Website-Live-brightgreen)](https://hexwarrior6.github.io/mailingo/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-
-[Official Website](https://hexwarrior6.github.io/mailingo/) · English · [简体中文](README_zh-hans.md)
-
-</div>
-
----
-
-## 💡 Introduction
-
-**Mailingo** is a native macOS companion app that brings **one-click full email translation** to Apple Mail. 
-
-When you receive an email in a foreign language, clicking the translation banner in Apple Mail instantly pops up a side-by-side **mirrored version**. Instead of extracting raw text and discarding formatting, Mailingo **preserves the full original email layout** — including complex tables, styled buttons, colors, and embedded images.
-
 <div align="center">
-  <img src="./docs/assets/screenshot-main.png" alt="Mailingo Main Screenshot" width="100%">
-  <p><em>Apple Mail reading pane with native translation banner (left) alongside Mailingo 1:1 translation mirror (right).</em></p>
+  <img src="docs/assets/icon.png" alt="" width="104">
+  <h1>Mailingo</h1>
+  <p>Read translated emails alongside the original in Apple Mail.</p>
+  <p>macOS 15 or later · Apple Mail · MIT license</p>
+  <p><a href="https://github.com/hexwarrior6/mailingo/releases/latest">Download</a> · <a href="https://hexwarrior6.github.io/mailingo/">Website</a> · <a href="README_zh-hans.md">简体中文</a></p>
 </div>
 
----
+![Apple Mail showing the original message alongside the Mailingo translation window](docs/assets/screenshot-main.png)
 
-## ✨ Features
+## Install and translate
 
-| Feature | Capability | What It Solves |
-| :--- | :--- | :--- |
-| **📑 1:1 Layout Fidelity** | Byte-level HTML slice-and-replace pipeline | Preserves original responsive tables, inline styles, callout blocks, and CSS layout without breaking formatting. |
-| **📬 Native MailKit Extension** | macOS Message Security extension point | Injects a translation action banner into Apple Mail's reading pane. Delivers raw MIME with **zero Automation permissions**. |
-| **🖼️ CID Inline Images** | Custom WebKit scheme handler (`mailingo-cid://`) | Correctly resolves and renders `cid:` attachments, corporate logos, and embedded screenshots. |
-| **🛡️ Privacy & Tracker Blocking** | Blocks external images by default, disables JS | Prevents tracking pixels from leaking read receipts to senders; supports one-click manual loading. |
-| **💬 Smart Reply Quote Folding** | Identifies Apple Mail, Gmail, Outlook & `>` quotes | Automatically collapses historical email threads, avoiding redundant translation and focusing only on current text. |
-| **⚡ Zero Idle Footprint** | Quits completely when the window is closed | Leaves zero background daemons and consumes 0 MB of idle memory; auto-closes alongside Apple Mail reading windows. |
-| **💾 Local Translation Cache** | LRU disk cache with size & retention policies | Ensures each email is translated only once, speeding up repeated views with instant cache hits. |
+1. Download `Mailingo.dmg` from [GitHub Releases](https://github.com/hexwarrior6/mailingo/releases/latest), drag Mailingo into Applications, and open it once.
+2. Quit Apple Mail with **⌘Q** and reopen it. In **Mail → Settings → Extensions**, enable **Mailingo**.
+3. Open a message and click **翻译** (Translate) in its banner. The translation opens in a separate window so you can keep the original in view.
 
----
+The release app is ad-hoc signed. If macOS blocks the first launch, verify the download against the release's `checksums.txt`. You can then clear quarantine for the app with `xattr -dr com.apple.quarantine /Applications/Mailingo.app`.
 
-## 📥 Installation
+## How it works
 
-### Download Mailingo
+- Translates message text while keeping HTML tables, links, styles and inline attachments in place. Remote images stay blocked until you choose to load them.
+- Folds quoted replies and caches translations locally so you can revisit a message without translating it again.
+- Uses Apple Translation by default. It may ask to download a language pack. The developer settings also support an OpenAI-compatible text endpoint and optional cloud image translation.
 
-Download the latest `.dmg` installer directly from:
-- **[Official Website](https://hexwarrior6.github.io/mailingo/)**
-- **[GitHub Releases](https://github.com/hexwarrior6/mailingo/releases)**
+## Where email data goes
 
-1. Open `Mailingo.dmg` and drag **Mailingo.app** into your `/Applications` folder.
-2. Launch Mailingo once from `/Applications` to register the MailKit extension with macOS.
+Apple Translation processes message text on the Mac. If you choose an OpenAI-compatible engine, translatable text goes to the endpoint you configure. If you configure cloud image translation and use it, the selected image goes to the configured provider. API secrets are stored in Keychain.
 
-> [!TIP]
-> **First-Launch Gatekeeper Notice**  
-> Since Mailingo is an independent open-source project without a paid Apple Developer certificate, macOS Gatekeeper may show a security prompt on first launch. If prompted, run this command in Terminal to clear the quarantine flag:
-> ```bash
-> xattr -cr /Applications/Mailingo.app
-> ```
+To pass messages from the Mail extension to the companion app, Mailingo stores recent raw messages locally in the extension's container. The translation cache and diagnostic files also stay on disk. Treat exported diagnostics and screenshots as email data before sharing them.
 
----
+## Contribute
 
-## ⚙️ Enable in Apple Mail
+Run `make test` on a Mac with Xcode 16 or later. To build the app, run `make bootstrap` to download the pinned XcodeGen version, then follow the signing and build steps in the contributor guide.
 
-1. **Quit Apple Mail completely** (`⌘Q`, not just closing the window — Mail only discovers new extensions on cold launch).
-2. Re-open Apple Mail → **Settings** (`⌘,`) → **Extensions** tab.
-3. Check the checkbox next to **Mailingo**.
-4. Open any email — the Mailingo translation banner will appear at the top of the message pane.
-
----
-
-## 🛠️ Building from Source (Developers)
-
-If you want to contribute or build Mailingo locally:
-
-### Requirements
-
-- macOS 15.0+ (Sequoia)
-- Xcode 16+ (Swift 6.0+)
-- Local Apple Development certificate (for codesigning Mail extensions locally)
-
-### Build Steps
-
-```bash
-# 1. Download build tooling (XcodeGen)
-make bootstrap
-
-# 2. Build, codesign, and install to /Applications
-make install-app
-```
-
----
-
-### Publishing a Release
-
-Keep `CHANGELOG.md` and GitHub Release notes in English. The generator preserves the established release sections and installation instructions.
-
-1. Add user-facing changes to `CHANGELOG.md` under `Unreleased` while developing.
-2. Before release, move those changes into a dated version section (for example, `## [0.1.2] - 2026-10-28`), update `MARKETING_VERSION` and increment `CURRENT_PROJECT_VERSION` in `project.yml`.
-3. Commit and push the changes, then create and push the matching tag, for example `v0.1.2`.
-
-The Release Build workflow validates the version and changelog, runs tests, builds the app, and publishes the DMG, ZIP and SHA-256 checksums. Release notes come from that version's changelog entry. For a manual rerun, select the existing release tag in the workflow input.
-
-To preview the notes locally:
-
-```bash
-python3 Scripts/release-notes.py v0.1.2 .build/release-notes.md
-```
-
-## 🛠️ Project Structure
-
-```text
-mailingo/
-├── App/                   # macOS Companion App (SwiftUI & WebKit inspection view)
-├── MailExtension/         # Apple Mail Extension (MailKit security extension point)
-├── Shared/                # Shared utilities and App Group container storage
-├── Packages/
-│   └── MailingoKit/       # Core libraries (EmailCore parser, TranslationCore, Cache)
-├── Design/                # Raw vector art and design assets
-├── Scripts/               # Build, appicon, verification, and diagnostics scripts
-└── docs/                  # Detailed specifications and architecture plans
-    ├── PRODUCT.md         # Product requirements baseline
-    ├── IMPLEMENTATION_PLAN.md # Technical architecture and risk mitigations
-    └── S0-PROBE.md        # MailKit extension feasibility probe report
-```
-
----
-
-## 📖 Deep Dive & Documentation
-
-For developers interested in the internal architecture and technical tradeoffs:
-- **[Product Requirements Baseline](docs/PRODUCT.md)** — Core user flows, sidebar specs, and design goals.
-- **[Implementation Plan & Architecture](docs/IMPLEMENTATION_PLAN.md)** — HTML byte-slicing pipeline, WebKit scheme handling, and caching.
-- **[S0 Probe Field Report](docs/S0-PROBE.md)** — Feasibility findings on MailKit extension hooks and MIME access.
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+[Contributor guide](CONTRIBUTING.md) · [Architecture](docs/README.md) · [Changelog](CHANGELOG.md) · [MIT License](LICENSE)

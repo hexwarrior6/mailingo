@@ -8,10 +8,10 @@ final class MIMEDecoderTests: XCTestCase {
 
     private let decoder = RFC822MIMEDecoder()
 
-    // MARK: - 真实邮件
+    // MARK: - Single-part HTML
 
-    func testRealSinglePartHTML() throws {
-        let decoded = try decoder.decode(Fixtures.data(Fixtures.realSinglepartHTML))
+    func testSinglePartHTML() throws {
+        let decoded = try decoder.decode(Fixtures.data(Fixtures.singlepartHTML))
 
         let html = try XCTUnwrap(decoded.html)
         XCTAssertFalse(html.isEmpty)

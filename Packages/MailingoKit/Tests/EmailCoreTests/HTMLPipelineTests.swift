@@ -10,7 +10,7 @@ final class HTMLPipelineTests: XCTestCase {
 
     /// 最强的那条断言：切片前后，**非文本字节 100% 一致**。
     func testSplicePreservesEveryNonTextByte() throws {
-        for fixture in [Fixtures.realSinglepartHTML, Fixtures.alternativeQP] {
+        for fixture in [Fixtures.singlepartHTML, Fixtures.alternativeQP] {
             let analysis = try EmailInspector.analyze(rawMessage: Fixtures.data(fixture))
             let inspection = try EmailInspector.apply(
                 translations: markerTranslations(for: analysis),
@@ -33,7 +33,7 @@ final class HTMLPipelineTests: XCTestCase {
 
     /// 跑一遍自检 API，确认它自己也是通过的（避免自检逻辑本身是坏的）。
     func testRuntimeFidelityReportIsClean() throws {
-        let analysis = try EmailInspector.analyze(rawMessage: Fixtures.data(Fixtures.realSinglepartHTML))
+        let analysis = try EmailInspector.analyze(rawMessage: Fixtures.data(Fixtures.singlepartHTML))
         let inspection = try EmailInspector.apply(translations: markerTranslations(for: analysis), to: analysis)
 
         XCTAssertTrue(inspection.fidelity.nonTextBytesIdentical, inspection.fidelity.detail)
@@ -46,7 +46,7 @@ final class HTMLPipelineTests: XCTestCase {
     /// 这条能成立靠的是 `HTMLSplicer` 对"未改动片段写回原始字节"的处理 ——
     /// 否则 `&#233;` 会被规范化成 `é`，字节就变了。
     func testIdentityTranslationIsByteIdentical() throws {
-        let analysis = try EmailInspector.analyze(rawMessage: Fixtures.data(Fixtures.realSinglepartHTML))
+        let analysis = try EmailInspector.analyze(rawMessage: Fixtures.data(Fixtures.singlepartHTML))
         let identity = Dictionary(uniqueKeysWithValues: analysis.segments.map { ($0.id, $0.sourceText) })
         let spliced = HTMLSplicer.splice(
             html: analysis.originalHTML,
@@ -177,10 +177,9 @@ final class HTMLPipelineTests: XCTestCase {
     /// 把 App 右侧预览窗格的内容钉住：标记确实插进去了，
     /// 而**非文本**东西确实还在。
     ///
-    /// 注意断言要跟着 fixture 走：真实那封是 ServiceNow 通知，里面**没有图片**，
-    /// 所以图片相关的断言放到带图片的合成 fixture 上（见下一个测试）。
-    func testMarkerSplicedRealFixtureKeepsStructureAndInsertsMarkers() throws {
-        let analysis = try EmailInspector.analyze(rawMessage: Fixtures.data(Fixtures.realSinglepartHTML))
+    /// 这个 fixture 没有图片。图片相关的断言放在下一个用例中。
+    func testMarkerSplicedSinglepartFixtureKeepsStructureAndInsertsMarkers() throws {
+        let analysis = try EmailInspector.analyze(rawMessage: Fixtures.data(Fixtures.singlepartHTML))
         let inspection = try EmailInspector.apply(translations: markerTranslations(for: analysis), to: analysis)
 
         XCTAssertFalse(inspection.usedPlainTextFallback)
@@ -274,7 +273,7 @@ final class HTMLPipelineTests: XCTestCase {
     /// 现在改成每份只分一趟、骨架和文本都从这一趟里出 ——
     /// 这个用例就是钉住"优化没有改变结果"。
     func testSkeletonFromRunsMatchesSkeletonOfHTML() throws {
-        for fixture in [Fixtures.realSinglepartHTML, Fixtures.alternativeQP] {
+        for fixture in [Fixtures.singlepartHTML, Fixtures.alternativeQP] {
             let html = try EmailInspector
                 .analyze(rawMessage: Fixtures.data(fixture))
                 .originalHTML

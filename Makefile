@@ -4,6 +4,7 @@ DERIVED  := $(CURDIR)/.build/DerivedData
 CONFIG   := Debug
 APP      := $(DERIVED)/Build/Products/$(CONFIG)/Mailingo.app
 APPEX    := $(APP)/Contents/PlugIns/MailingoMailExtension.appex
+INSTALLED_APP := /Applications/Mailingo.app
 LOGDIR   := $(HOME)/Library/Containers/com.zhuyuhao.Mailingo.MailExtension/Data/Library/Logs/Mailingo
 LEGACY   := $(HOME)/Library/Logs/Mailingo
 LOG      := $(LOGDIR)/probe.log
@@ -21,10 +22,10 @@ help:
 	@echo "make gen        生成 Mailingo.xcodeproj（XcodeGen）"
 	@echo "make build      编译（含 appex 嵌入）"
 	@echo "make dmg        打包为 DMG 镜像和 ZIP（可加 CONFIG=Release）"
-	@echo "make test       跑 EmailCore 单元测试（23 个）"
+	@echo "make test       运行 MailingoKit 单元测试"
 	@echo "make appicon    从 ART=<画稿.png> 生成 App 图标（可加 SHRINK=88）"
 	@echo "make appicon-project  用项目画稿重新生成正式图标（CROP=80）"
-	@echo "make run        编译并启动容器 App（探针看板）"
+	@echo "make run        编译并启动 Mailingo"
 	@echo "make register   向 pluginkit 注册 appex，并列出 Mail 扩展"
 	@echo "make status     打印 S0 判定摘要"
 	@echo "make log        实时跟随探针日志"
@@ -60,7 +61,7 @@ gen:
 
 build: gen
 	xcodebuild -project Mailingo.xcodeproj -scheme Mailingo -configuration $(CONFIG) \
-	  -derivedDataPath $(DERIVED) build
+	  -derivedDataPath "$(DERIVED)" build
 
 dmg: build
 	@bash Scripts/package-dmg.sh "$(APP)" "$(CURDIR)/.build/dist"
@@ -117,7 +118,7 @@ appicon:
 	  Scripts/make-appicon.swift "$(ART)" $(if $(CROP),--crop $(CROP),) $(if $(SHRINK),--shrink $(SHRINK),)
 	@echo "→ 接着跑 make gen && make build"
 
-# 本项目正式用的那份图标（CROP=80，理由见 README「App 图标」）。
+# 本项目正式用的那份图标（CROP=80）。
 # 画稿换新时跑这一条即可。
 appicon-project:
 	@$(MAKE) --no-print-directory appicon ART=Design/AppIcon.png CROP=80
@@ -189,15 +190,16 @@ reset-log:
 
 # 强制让 LaunchServices/pkd 重新扫描扩展。改完 project.yml 或重装后建议跑一次。
 refresh-plugins:
-	-/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister -f -R -trusted "/Applications/Mailingo.app"
-	-pluginkit -a "$(APPEX)"
+	-/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister -f -R -trusted "$(INSTALLED_APP)"
+	-pluginkit -a "$(INSTALLED_APP)/Contents/PlugIns/MailingoMailExtension.appex"
 	@echo "== 已注册的 Mail 扩展 =="
 	-pluginkit -m -p com.apple.email.extension -v
 
-install-app: build verify-appex
+install-app: build
+	$(MAKE) --no-print-directory verify-appex
 	@echo "== 拷贝到 /Applications（会覆盖同名 App）=="
-	rm -rf "/Applications/Mailingo.app"
-	ditto "$(APP)" "/Applications/Mailingo.app"
+	rm -rf "$(INSTALLED_APP)"
+	ditto "$(APP)" "$(INSTALLED_APP)"
 	@echo "== 重新注册（必须在拷贝之后）=="
 	$(MAKE) --no-print-directory refresh-plugins
 	@echo ""

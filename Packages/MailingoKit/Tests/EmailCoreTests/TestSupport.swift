@@ -10,8 +10,8 @@ import XCTest
 /// 任何"顺手规范化一下"都会让测试失去意义。
 enum Fixtures {
 
-    /// 真实邮件（已脱敏）：单部分 `text/html`，UTF-8。
-    static let realSinglepartHTML = "real-singlepart-html.eml"
+    /// 合成：单部分 `text/html`，UTF-8 + quoted-printable。
+    static let singlepartHTML = "synthetic-singlepart-html.eml"
     /// 合成：`multipart/alternative` + CRLF + quoted-printable。
     static let alternativeQP = "synthetic-alternative-qp.eml"
     /// 合成：`multipart/related` + GB18030 + base64 + CID 内联图。

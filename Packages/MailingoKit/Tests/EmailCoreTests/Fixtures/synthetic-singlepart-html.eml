@@ -1,0 +1,31 @@
+From: Example Support <support@example.com>
+To: Example Reader <reader@example.com>
+Subject: =?UTF-8?Q?Caf=C3=A9_reservation?=
+Date: Wed, 23 Sep 2026 13:01:46 +0000
+Message-ID: <singlepart-html@example.com>
+MIME-Version: 1.0
+Content-Type: text/html;
+ charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+<!doctype html>
+<html>
+<head>
+<meta charset=3D"utf-8">
+<style>
+  table { width: 100%; border-collapse: collapse; }
+  .action { color: #234567; }
+</style>
+</head>
+<body>
+<table role=3D"presentation" cellpadding=3D"12">
+<tr><td>
+<h1>Your caf=C3=A9 reservation is confirmed</h1>
+<p>Show this message at the counter to collect your order.</p>
+<p><a class=3D"action" href=3D"https://example.com/reservations">View reser=
+vation details</a></p>
+<p>Questions? Contact Example Support &amp; Services.</p>
+</td></tr>
+</table>
+</body>
+</html>
