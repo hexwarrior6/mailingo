@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-14
+
 ### Fixed
 - **Email Scrolling Performance**: Eliminated severe scrolling stutter on long emails (such as multi-section newsletters) by removing an O(n²) string distance calculation in HTML tokenization, caching intermediate linkified and rendered HTML templates, avoiding redundant timer-driven SwiftUI updates when selection state has not changed, and caching the deduplicated message store behind a directory-mtime guard so the Mail-selection poll no longer rescans every cached message on the main thread.
 - **Local Installation**: Verify the freshly built app before copying it into Applications and register the installed Mail extension.
