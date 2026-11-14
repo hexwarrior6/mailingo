@@ -945,7 +945,9 @@ final class InspectorModel: ObservableObject {
             }
 
             guard !followSuppressed else {
-                mailFollowStatus = .following
+                if mailFollowStatus != .following {
+                    mailFollowStatus = .following
+                }
                 trace.debug("跟随被抑制（用户手动选过）→ 这次不切")
                 return
             }
@@ -954,11 +956,16 @@ final class InspectorModel: ObservableObject {
                 matchingInternetMessageID: selection.internetMessageID
             ) else {
                 // Mail 选中了，但那封邮件扩展还没收到（刚点开、还在解码）
-                mailFollowStatus = .waiting("Mail 选中的邮件还没同步过来…")
+                let waiting = MailFollowStatus.waiting("Mail 选中的邮件还没同步过来…")
+                if mailFollowStatus != waiting {
+                    mailFollowStatus = waiting
+                }
                 return
             }
 
-            mailFollowStatus = .following
+            if mailFollowStatus != .following {
+                mailFollowStatus = .following
+            }
             // 稳态（选中的就是当前这封）**刻意不打日志** —— 它每 0.5 秒
             // 就会来一次，打出来只会把真正有用的行淹掉。诊断时"没有 load 开始"
             // 本身就说明是稳态。
@@ -969,13 +976,18 @@ final class InspectorModel: ObservableObject {
 
         case .failure(let error):
             guard let selectionError = error as? MailSelectionError else {
-                mailFollowStatus = .failed(String(describing: error))
+                let failed = MailFollowStatus.failed(String(describing: error))
+                if mailFollowStatus != failed {
+                    mailFollowStatus = failed
+                }
                 return
             }
             switch selectionError {
             case .automationDenied:
                 noViewerStreak = 0
-                mailFollowStatus = .permissionDenied
+                if mailFollowStatus != .permissionDenied {
+                    mailFollowStatus = .permissionDenied
+                }
 
             case .noViewer, .mailNotRunning:
                 // Mail 的阅读窗口不在了（或 Mail 自己退了）。
@@ -989,13 +1001,19 @@ final class InspectorModel: ObservableObject {
                     closeForMailViewerGone()
                     return
                 }
-                mailFollowStatus = .waiting(selectionError.description)
+                let waiting = MailFollowStatus.waiting(selectionError.description)
+                if mailFollowStatus != waiting {
+                    mailFollowStatus = waiting
+                }
 
             default:
                 noViewerStreak = 0
-                mailFollowStatus = selectionError.isTransient
+                let target: MailFollowStatus = selectionError.isTransient
                     ? .waiting(selectionError.description)
                     : .failed(selectionError.description)
+                if mailFollowStatus != target {
+                    mailFollowStatus = target
+                }
             }
         }
     }

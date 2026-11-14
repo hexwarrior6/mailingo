@@ -123,7 +123,20 @@ public enum MessageStore {
     /// 这里按 `Message-ID` 归组，**保留字节数最多的那份**（最完整）。
     /// 没有 Message-ID 的邮件无法归组，各自保留。
     public static func all() -> [StoredMessage] {
-        let stored = metadata().filter {
+        let stamp: Date? = (try? SharedPaths.messages.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+
+        metadataLock.lock()
+        defer { metadataLock.unlock() }
+
+        // 去重 + .eml 存在性过滤的结果也一并缓存：跟随轮询每 0.5 秒经
+        // `mostComplete` / `message(matchingInternetMessageID:)` 走到这里，
+        // 重算一遍要对每封邮件各做一次 stat（.eml 过滤）+ 归一化去重 + 排序。
+        // 失效信号与 `metadata()` 相同 —— 目录 mtime。
+        if let stamp, stamp == allCacheStamp {
+            return allCache
+        }
+
+        let stored = metadataLocked().filter {
             FileManager.default.fileExists(atPath: SharedPaths.messages.appendingPathComponent("\($0.id).eml").path)
         }
 
@@ -148,8 +161,14 @@ public enum MessageStore {
             }
         }
 
-        return (Array(bestByMessageID.values) + ungrouped)
+        let fresh = (Array(bestByMessageID.values) + ungrouped)
             .sorted { $0.capturedAt > $1.capturedAt }
+
+        if let stamp {
+            allCache = fresh
+            allCacheStamp = stamp
+        }
+        return fresh
     }
 
     /// 内容版本 ID 可能不在去重后的列表中；先读取它的身份，再定位可用版本。
@@ -164,20 +183,57 @@ public enum MessageStore {
     }
 
     private static func metadata() -> [StoredMessage] {
+        metadataLock.lock()
+        defer { metadataLock.unlock() }
+        return metadataLocked()
+    }
+
+    /// `metadata()` 与 `all()` 共用一把非重入锁，`all()` 持锁期间要走这个
+    /// 不加锁的版本，否则自锁死锁（NSLock 不可重入）。
+    private static func metadataLocked() -> [StoredMessage] {
         let directory = SharedPaths.messages
+        let stamp: Date? = (try? directory.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+
+        // 目录条目没变 → 直接用上一份结果。跟随轮询每 0.5 秒都会经
+        // `mostComplete` / `message(matchingInternetMessageID:)` 走到这里，
+        // 不缓存的话每次都是「readdir + 逐文件 open/decode + 逐 .eml fileExists」
+        // 的全量磁盘扫描（几十封邮件 = 上百次文件系统调用），而且发生在主线程
+        // 上——磁盘一抖就是一次滚动卡顿。
+        if let stamp, stamp == metadataCacheStamp {
+            return metadataCache
+        }
+
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: nil
         ) else { return [] }
 
         let decoder = JSONDecoder.messages
-        return entries
+        let fresh = entries
             .filter { $0.pathExtension == "json" }
             .compactMap { url -> StoredMessage? in
                 guard let data = try? Data(contentsOf: url) else { return nil }
                 return try? decoder.decode(StoredMessage.self, from: data)
             }
+
+        // 失效信号是**目录 mtime**：所有写入都走 atomic（临时文件 + rename）
+        // 或删除，目录条目一变 mtime 必变（appex 在另一个进程里写也一样）。
+        // 生产代码没有原地改写 .json 的路径。
+        if let stamp {
+            metadataCache = fresh
+            metadataCacheStamp = stamp
+        }
+        return fresh
     }
+
+    /// `metadata()` 的目录 mtime 守卫缓存与互斥锁（appex 与容器 App 都会调用，
+    /// 且轮询让它在主线程上高频出现，必须线程安全）。
+    private static var metadataCache: [StoredMessage] = []
+    private static var metadataCacheStamp: Date?
+    /// `all()` 去重结果的缓存 —— 与 `metadata()` 共用一把锁、同一个失效信号。
+    private static var allCache: [StoredMessage] = []
+    private static var allCacheStamp: Date?
+    private static let metadataLock = NSLock()
 
     /// 按 Message-ID 找一封邮件（比较前会归一化尖括号）。
     ///

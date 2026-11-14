@@ -92,6 +92,16 @@ struct EmailWebView: NSViewRepresentable {
         /// 上一次渲染的**源 HTML** —— 用于区分「同一封邮件的增量重载」和「换了新邮件」
         private var lastSourceHTML = ""
         private var loadedRenderedHTML: String?
+
+        // 缓存：对同一份 sourceHTML，EmailAutolink.linkify 和 CIDReferenceRewriter.rewrite
+        // 的中间产物完全不依赖角标，长邮件可直接复用，避免每次更新耗费数百毫秒重分词。
+        private var cachedBaseSourceHTML: String?
+        private var cachedBaseHTML: String?
+        // 缓存：对同一份 (sourceHTML, badges)，完整渲染的 HTML 可直接复用，避免在 updateNSView 时同步重复计算
+        private var cachedPreparedSourceHTML: String?
+        private var cachedPreparedBadges: [String: ImageTranslationOverlay.Badge]?
+        private var cachedPreparedHTML: String?
+
         /// 同一封邮件内的增量重载（角标/图源变化）要**恢复滚动位置**：
         /// loadHTMLString 会把页面顶回最上面，用户正读着内容会被拽走。
         /// 横向也要存 —— 宽表格/海报图的横向滚动位置一样会丢。
@@ -155,6 +165,14 @@ struct EmailWebView: NSViewRepresentable {
             // 宁可多等一个异步回合，也不能先放请求出去。
             if appliedRemotePolicy == false, !isBlockingInPlace { return }
 
+            let currentBadges = presentation?.badges ?? [:]
+            // 若源 HTML 与角标均未发生变化且已有加载好的渲染副本，无需重新推导或重新加载
+            if currentHTML == lastSourceHTML,
+               currentBadges == cachedPreparedBadges,
+               loadedRenderedHTML != nil {
+                return
+            }
+
             let rendered = prepareRenderedHTML(from: currentHTML)
             guard loadedRenderedHTML != rendered else { return }
 
@@ -182,26 +200,50 @@ struct EmailWebView: NSViewRepresentable {
             }
         }
 
+        /// 基础渲染副本（纯文本超链接转换 + cid: 资源改写）。
+        /// 这一步与角标无关，且在长邮件上（例如数百 KB 的 Newsletter）耗时较大，只要源 HTML 未变就坚决复用。
+        private func basePreparedHTML(from sourceHTML: String) -> String {
+            if sourceHTML == cachedBaseSourceHTML, let cached = cachedBaseHTML {
+                return cached
+            }
+            let base = CIDReferenceRewriter.rewrite(
+                EmailAutolink.linkify(sourceHTML)
+            )
+            cachedBaseSourceHTML = sourceHTML
+            cachedBaseHTML = base
+            return base
+        }
+
         /// 准备要在 WebKit 中渲染的临时 HTML 副本。
         /// 纯文本链接自动包装为超链接、重写 cid: 资源、注入图片翻译角标、注入响应式排版样式。
         private func prepareRenderedHTML(from sourceHTML: String) -> String {
-            EmailResponsiveLayout.inject(
+            let currentBadges = presentation?.badges ?? [:]
+            if sourceHTML == cachedPreparedSourceHTML,
+               currentBadges == cachedPreparedBadges,
+               let cached = cachedPreparedHTML {
+                return cached
+            }
+
+            let base = basePreparedHTML(from: sourceHTML)
+            let rendered = EmailResponsiveLayout.inject(
                 into: ImageTranslationOverlay.inject(
-                    into: CIDReferenceRewriter.rewrite(
-                        EmailAutolink.linkify(sourceHTML)
-                    ),
-                    badges: presentation?.badges ?? [:]
+                    into: base,
+                    badges: currentBadges
                 )
             )
+            cachedPreparedSourceHTML = sourceHTML
+            cachedPreparedBadges = currentBadges
+            cachedPreparedHTML = rendered
+            return rendered
         }
 
         /// 执行一次渲染副本加载。加载时**重新推导**注入结果 ——
         /// 等待读滚动位置期间状态可能又变了，永远加载最新的一版。
         private func loadRendered(_ rendered: String, scrollTo point: CGPoint?) {
             guard let webView else { return }
-            let rendered = prepareRenderedHTML(from: currentHTML)
+            let renderedToLoad = prepareRenderedHTML(from: currentHTML)
             pendingScroll = point
-            loadedRenderedHTML = rendered
+            loadedRenderedHTML = renderedToLoad
             // App-owned scripts run even with email JavaScript disabled. Install
             // at document end so folding does not wait for remote images to load.
             let controller = webView.configuration.userContentController
@@ -212,7 +254,7 @@ struct EmailWebView: NSViewRepresentable {
                 forMainFrameOnly: true,
                 in: .defaultClient
             ))
-            webView.loadHTMLString(rendered, baseURL: nil)
+            webView.loadHTMLString(renderedToLoad, baseURL: nil)
         }
 
         // MARK: 远程内容策略

@@ -34,7 +34,7 @@ struct HTMLTokenizer {
     ///
     /// 必须带 `elementID` 而不是只比标签名：`<p>to</p><p>to</p>` 里两个 `p`
     /// 名字相同却是**不同的**段落，各自的 `to` 都是完整语境，不能算兄弟。
-    /// elementID 用该标签在原文里的起始偏移，天然唯一。
+    /// elementID 递增分配，保证每个开启的元素天然拥有唯一标识，避免全文档遍历字符距离导致 O(n²) 耗时。
     struct BlockContext: Equatable {
         let tag: String
         let elementID: Int
@@ -83,6 +83,7 @@ struct HTMLTokenizer {
         var stack: [OpenElement] = []
         var i = html.startIndex
         var quotedTail = false
+        var nextElementID = 0
 
         while i < html.endIndex {
             try Task.checkCancellation()
@@ -166,8 +167,9 @@ struct HTMLTokenizer {
                     // 用 '<' 的偏移作为这个元素的唯一身份
                     let attributes = ReplyQuotePolicy.attributes(in: String(inner))
                     if ReplyQuotePolicy.startsQuotedTail(attributes) { quotedTail = true }
+                    nextElementID += 1
                     stack.append(OpenElement(
-                        name: name, id: html.distance(from: html.startIndex, to: i),
+                        name: name, id: nextElementID,
                         isReplyQuote: ReplyQuotePolicy.isQuoteContainer(name: name, attributes: attributes)
                     ))
 
